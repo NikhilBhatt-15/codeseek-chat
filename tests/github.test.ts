@@ -34,9 +34,10 @@ describe('file selection', () => {
       { path: 'src/huge.py', size: 999_999 },
       { path: 'src/b.py', size: 100 },
     ];
-    const { files, skipped } = selectFiles(entries, { maxFiles: 2, maxFileBytes: 1000, maxTotalBytes: 10_000 });
+    const { files, skipped, skippedBytes } = selectFiles(entries, { maxFiles: 2, maxFileBytes: 1000, maxTotalBytes: 10_000 });
     expect(files.map((f) => f.path)).toEqual(['src/a.py', 'src/b.py']);
     expect(skipped).toBe(2);
+    expect(skippedBytes).toBe(200); // README + test file; huge.py is over maxFileBytes, not a candidate
   });
 });
 
@@ -112,7 +113,7 @@ describe('fetchContents', () => {
     }) as unknown as typeof fetch;
     const files = Array.from({ length: 10 }, (_, i) => ({ path: `f${i}.py`, size: 1 }));
     files.push({ path: 'bin.py', size: 1 });
-    const snap = { owner: 'o', repo: 'r', branch: 'main', commit: 'c', files, skipped: 0, truncated: false };
+    const snap = { owner: 'o', repo: 'r', branch: 'main', commit: 'c', files, skipped: 0, skippedBytes: 0, truncated: false };
     const progress: number[] = [];
     const out = await fetchContents(snap, (d) => progress.push(d), undefined, fake, 3);
     expect(peak).toBeLessThanOrEqual(3);

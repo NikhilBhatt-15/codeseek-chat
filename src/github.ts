@@ -15,6 +15,7 @@ export interface RepoSnapshot {
   commit: string;
   files: RepoFile[];
   skipped: number; // indexable-looking files left out because of the size limits
+  skippedBytes: number;
   truncated: boolean; // GitHub's tree listing was cut short (very large repos)
 }
 
@@ -29,9 +30,16 @@ export interface Limits {
   maxTotalBytes: number;
 }
 
-// Sized so a first index takes a few minutes at most on a laptop GPU (~2 chunks/s on an
-// Intel iGPU, ~1 chunk per 1 KB of code). Source is kept first; big test suites are dropped.
-export const DEFAULT_LIMITS: Limits = { maxFiles: 300, maxFileBytes: 100_000, maxTotalBytes: 400_000 };
+export type IndexSize = 'quick' | 'full';
+
+// Code embeds at roughly 1 chunk per KB; a laptop iGPU manages ~2 chunks/s. Quick keeps a
+// first index to a few minutes; Full takes everything up to the old browser-friendly cap.
+// Either way source is kept first, so it is big test suites and docs that get dropped.
+export const LIMITS: Record<IndexSize, Limits> = {
+  quick: { maxFiles: 300, maxFileBytes: 100_000, maxTotalBytes: 400_000 },
+  full: { maxFiles: 400, maxFileBytes: 200_000, maxTotalBytes: 2_500_000 },
+};
+export const DEFAULT_LIMITS = LIMITS.quick;
 
 // Same rules as codeseek's discovery.py.
 const SKIP_DIRS = new Set([
@@ -86,7 +94,7 @@ export function isIndexable(path: string): boolean {
 export function selectFiles(
   entries: RepoFile[],
   limits: Limits = DEFAULT_LIMITS,
-): { files: RepoFile[]; skipped: number } {
+): { files: RepoFile[]; skipped: number; skippedBytes: number } {
   const candidates = entries.filter((f) => f.size > 0 && f.size <= limits.maxFileBytes && isIndexable(f.path));
   const rank = (p: string) => (/\.(md|mdx|rst|txt|json|ya?ml|toml|xml|ini|cfg)$/i.test(p) ? 1 : 0);
   const isTest = (p: string) => /(^|\/)(tests?|__tests__|spec)\/|\.(test|spec)\./i.test(p);
@@ -105,7 +113,9 @@ export function selectFiles(
     total += f.size;
   }
   files.sort((a, b) => a.path.localeCompare(b.path));
-  return { files, skipped: candidates.length - files.length };
+  const chosen = new Set(files);
+  const skippedBytes = candidates.reduce((sum, f) => sum + (chosen.has(f) ? 0 : f.size), 0);
+  return { files, skipped: candidates.length - files.length, skippedBytes };
 }
 
 async function api<T>(path: string, fetchImpl: typeof fetch, token?: string): Promise<T> {
@@ -151,8 +161,8 @@ export async function fetchSnapshot(
     token,
   );
   const blobs = tree.tree.filter((e) => e.type === 'blob').map((e) => ({ path: e.path, size: e.size ?? 0 }));
-  const { files, skipped } = selectFiles(blobs, limits);
-  return { owner, repo, branch, commit: commit.sha, files, skipped, truncated: tree.truncated };
+  const { files, skipped, skippedBytes } = selectFiles(blobs, limits);
+  return { owner, repo, branch, commit: commit.sha, files, skipped, skippedBytes, truncated: tree.truncated };
 }
 
 export function rawUrl(snap: Pick<RepoSnapshot, 'owner' | 'repo' | 'commit'>, path: string): string {

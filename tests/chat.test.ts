@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseSseEvents, streamChat, textOfChunk } from '../src/gemini';
 import { linkCitations, retrievalQuery, userPrompt } from '../src/prompt';
 import { EMBED_DIM } from '../src/protocol';
-import { chunkRepo, dedupeHits, embedChunks, search, type Hit } from '../src/repoIndex';
+import { buildIndex, chunkRepo, dedupeHits, embedChunks, estimateChunks, missingFiles, search, type Hit } from '../src/repoIndex';
 
 const unit = (dim: number) => {
   const v = new Float32Array(EMBED_DIM);
@@ -95,5 +95,35 @@ describe('gemini streaming', () => {
     await expect(
       streamChat({ apiKey: 'bad', model: 'm', system: 's', turns: [], onText: () => {}, fetchImpl: fake }),
     ).rejects.toThrow(/key was rejected/);
+  });
+});
+
+describe('extending a quick index', () => {
+  const snap = (files: string[], skipped = 0) => ({
+    owner: 'o', repo: 'r', branch: null, commit: 'c', truncated: false, skipped, skippedBytes: skipped * 1000,
+    files: files.map((path) => ({ path, size: 10 })),
+  });
+  const vec = (n: number, fill: number) => new Float32Array(n * EMBED_DIM).fill(fill);
+  const chunk = (path: string) => ({ path, startLine: 1, endLine: 1, text: path });
+
+  it('adds only the missing files and keeps rows aligned', () => {
+    const quick = buildIndex(snap(['a.py', 'b.py'], 2), 'quick', [chunk('a.py'), chunk('b.py')], vec(2, 1), ['a.py', 'b.py']);
+    expect(quick).toMatchObject({ size: 'quick', skipped: 2, skippedBytes: 2000 });
+
+    const full = snap(['a.py', 'b.py', 'c.py', 'empty.py']);
+    expect(missingFiles(full, quick).map((f) => f.path)).toEqual(['c.py', 'empty.py']);
+
+    const extended = buildIndex(full, 'full', [chunk('c.py')], vec(1, 2), ['c.py', 'empty.py'], quick);
+    expect(extended).toMatchObject({ size: 'full', skipped: 0, key: quick.key });
+    expect(extended.paths).toEqual(['a.py', 'b.py', 'c.py', 'empty.py']);
+    expect(extended.chunks.map((c) => c.path)).toEqual(['a.py', 'b.py', 'c.py']);
+    expect(extended.vectors.length).toBe(3 * EMBED_DIM);
+    expect(extended.vectors[2 * EMBED_DIM]).toBe(2); // c.py's row follows the original two
+    expect(missingFiles(full, extended)).toEqual([]);
+  });
+
+  it('estimates about one chunk per KB', () => {
+    expect(estimateChunks(1_161_709)).toBe(1162); // ky: 1,106 chunks measured
+    expect(estimateChunks(10)).toBe(1);
   });
 });

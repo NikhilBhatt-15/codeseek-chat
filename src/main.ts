@@ -1,16 +1,18 @@
 import { Embedder } from './embedder';
 import { DEFAULT_MODEL, GeminiError, streamChat, SUGGESTED_MODELS, type Turn } from './gemini';
-import { blobUrl, fetchContents, fetchSnapshot, GitHubError, parseRepo, type RepoSnapshot } from './github';
+import { blobUrl, fetchContents, fetchSnapshot, GitHubError, LIMITS, parseRepo, type IndexSize } from './github';
 import { linkCitations, retrievalQuery, systemPrompt, userPrompt } from './prompt';
 import { renderMarkdown } from './render';
 import {
+  buildIndex,
   chunkRepo,
   dedupeHits,
   embedChunks,
-  indexFromSnapshot,
+  estimateChunks,
   indexKey,
   loadCached,
   loadLatestCached,
+  missingFiles,
   saveCached,
   search,
   type Hit,
@@ -106,12 +108,41 @@ function updateModeNote(): void {
 
 // ---- indexing ----
 
-async function indexRepo(input: string): Promise<void> {
+const SIZE_STORAGE = 'codeseek-chat:size';
+const RATE_STORAGE = 'codeseek-chat:chunks-per-second';
+
+const sizeSelect = $<HTMLSelectElement>('size-select');
+sizeSelect.value = store.get(SIZE_STORAGE) === 'full' ? 'full' : 'quick';
+sizeSelect.addEventListener('change', () => store.set(SIZE_STORAGE, sizeSelect.value, true));
+
+/** This device's embedding speed from its last run, for time estimates. */
+function measuredRate(): number | null {
+  const rate = Number(store.get(RATE_STORAGE));
+  return rate > 0 ? rate : null;
+}
+
+function duration(seconds: number): string {
+  if (seconds < 60) return `${Math.max(5, Math.round(seconds / 5) * 5)} s`;
+  return `${Math.round(seconds / 60)} min`;
+}
+
+function estimate(chunks: number): string {
+  const rate = measuredRate();
+  return rate ? `about ${duration(chunks / rate)}` : `~${plural(chunks, 'chunk')}`;
+}
+
+interface IndexOptions {
+  size?: IndexSize;
+  extend?: RepoIndex; // index the files this one skipped, at the same commit
+}
+
+async function indexRepo(input: string, opts: IndexOptions = {}): Promise<void> {
   const ref = parseRepo(input);
   if (!ref) {
     showError('Enter a repository as owner/repo or a github.com URL.');
     return;
   }
+  const size: IndexSize = opts.size ?? (sizeSelect.value === 'full' ? 'full' : 'quick');
   showError(null);
   indexing?.abort();
   const controller = new AbortController();
@@ -121,19 +152,24 @@ async function indexRepo(input: string): Promise<void> {
   $<HTMLButtonElement>('index-btn').disabled = true;
   $('progress').hidden = false;
   $('chat').hidden = true;
-  $('progress-title').textContent = `Indexing ${ref.owner}/${ref.repo}…`;
+  $('progress-title').textContent = `${opts.extend ? 'Indexing the rest of' : 'Indexing'} ${ref.owner}/${ref.repo}…`;
   setStep(0, 'Listing files…', 0);
 
   try {
-    const snap = await fetchSnapshot(ref, undefined, undefined, settings.githubToken || undefined);
+    // Extending pins the commit, so new chunks line up with the ones already indexed.
+    const snapRef = opts.extend ? { ...ref, ref: opts.extend.commit } : ref;
+    const snap = await fetchSnapshot(snapRef, LIMITS[size], undefined, settings.githubToken || undefined);
     signal.throwIfAborted();
-    const cached = await loadCached(indexKey(snap.owner, snap.repo, snap.commit));
-    if (cached) {
+    const cached = opts.extend ?? (await loadCached(indexKey(snap.owner, snap.repo, snap.commit)));
+    if (cached && (size === 'quick' || cached.size === 'full' || cached.skipped === 0)) {
       openChat(cached, 'loaded from this browser’s cache');
       void getEmbedder().load(); // warm up for the first question
       return;
     }
-    if (snap.files.length === 0) throw new GitHubError('No source files found in that repository.');
+    // A cached quick index of this commit is extended rather than rebuilt.
+    const base = cached ?? undefined;
+    const todo = missingFiles(snap, base ?? null);
+    if (!base && todo.length === 0) throw new GitHubError('No source files found in that repository.');
 
     // Start the model download while files are fetched.
     const emb = getEmbedder();
@@ -146,9 +182,10 @@ async function indexRepo(input: string): Promise<void> {
     const modelReady = emb.load();
     modelReady.catch(() => {}); // surfaced below
 
-    setStep(1, `${plural(snap.files.length, 'file')} selected`, 0.05);
+    const todoBytes = todo.reduce((sum, f) => sum + f.size, 0);
+    setStep(1, `${plural(todo.length, 'file')} to index (${estimate(estimateChunks(todoBytes))})`, 0.05);
     const contents = await fetchContents(
-      snap,
+      { ...snap, files: todo },
       (done, total) => setStep(1, `${done} / ${total} files`, 0.05 + 0.15 * (done / total)),
       signal,
     );
@@ -167,30 +204,36 @@ async function indexRepo(input: string): Promise<void> {
     }
     signal.throwIfAborted();
 
+    const where = device === 'webgpu' ? 'your GPU (WebGPU)' : 'your CPU (WASM)';
+    setStep(3, `${plural(chunks.length, 'chunk')} on ${where}, ${estimate(chunks.length)}`, 0.4);
     const started = performance.now();
     const vectors = await embedChunks(
       chunks,
       (texts) => emb.embedBatch(texts),
       (done, total) => {
         const secs = (performance.now() - started) / 1000;
-        const eta = done > 0 ? Math.round((secs / done) * (total - done)) : 0;
-        setStep(3, `${done} / ${plural(total, 'chunk')} on ${device === 'webgpu' ? 'your GPU (WebGPU)' : 'your CPU (WASM)'}${eta > 2 ? `, about ${eta}s left` : ''}`, 0.4 + 0.6 * (done / total));
+        const left = done > 0 ? (secs / done) * (total - done) : 0;
+        setStep(3, `${done} / ${plural(total, 'chunk')} on ${where}${left > 3 ? `, about ${duration(left)} left` : ''}`, 0.4 + 0.6 * (done / total));
       },
       signal,
     );
-    const files = [...contents.values()].filter(Boolean).length;
-    const built = indexFromSnapshot(snap, chunks, vectors, files);
+    const secs = (performance.now() - started) / 1000;
+    if (chunks.length >= 16 && secs > 0) store.set(RATE_STORAGE, (chunks.length / secs).toFixed(2), true);
+
+    const built = buildIndex(snap, size, chunks, vectors, [...contents.keys()], base);
     await saveCached(built);
-    openChat(built, describeSkips(snap));
+    openChat(built, base ? `added ${plural(todo.length, 'file')}` : '');
   } catch (err) {
     if (signal.aborted) {
       $('progress').hidden = true;
+      if (opts.extend) openChat(opts.extend, ''); // back to the index we had
       return;
     }
     if (err instanceof GitHubError && err.rateLimited) {
-      const fallback = await loadLatestCached(ref.owner, ref.repo);
+      const fallback = opts.extend ?? (await loadLatestCached(ref.owner, ref.repo));
       if (fallback) {
         openChat(fallback, 'cached copy: GitHub rate limit reached, so newer commits were not checked');
+        showError(err.message);
         return;
       }
     }
@@ -202,10 +245,10 @@ async function indexRepo(input: string): Promise<void> {
   }
 }
 
-function describeSkips(snap: RepoSnapshot): string {
+function coverageNote(built: RepoIndex): string {
   const notes: string[] = [];
-  if (snap.skipped) notes.push(`${plural(snap.skipped, 'file')} skipped to stay within browser limits`);
-  if (snap.truncated) notes.push('GitHub truncated the file list (very large repo)');
+  if (built.skipped) notes.push(`${plural(built.skipped, 'file')} not indexed (size limit)`);
+  if (built.truncated) notes.push('GitHub truncated the file list (very large repo)');
   return notes.join('; ');
 }
 
@@ -223,9 +266,21 @@ function openChat(built: RepoIndex, note: string): void {
   link.setAttribute('target', '_blank');
   link.setAttribute('rel', 'noopener');
   label.replaceChildren(link, ` @ ${built.branch ?? built.commit.slice(0, 7)}${built.branch ? ` (${built.commit.slice(0, 7)})` : ''}`);
-  $('repo-stats').textContent = [`${plural(built.files, 'file')}, ${plural(built.chunks.length, 'chunk')}`, note]
+  $('repo-stats').textContent = [
+    `${plural(built.paths.length, 'file')}, ${plural(built.chunks.length, 'chunk')}`,
+    note,
+    coverageNote(built),
+  ]
     .filter(Boolean)
     .join(' · ');
+
+  const more = $<HTMLButtonElement>('more-btn');
+  const canExtend = built.size === 'quick' && built.skipped > 0;
+  more.hidden = !canExtend;
+  if (canExtend) {
+    more.textContent = `Index the rest (${plural(built.skipped, 'file')}, ${estimate(estimateChunks(built.skippedBytes))})`;
+    more.onclick = () => void indexRepo(`${built.owner}/${built.repo}`, { size: 'full', extend: built });
+  }
   updateModeNote();
   try {
     setRepoParam(`${built.owner}/${built.repo}`);

@@ -32,6 +32,10 @@
 
       <form id="repo-form" class="repo-form" autocomplete="off">
         <input id="repo-input" name="repo" placeholder="owner/repo or https://github.com/owner/repo" aria-label="GitHub repository" required />
+        <select id="size-select" aria-label="How much of the repo to index" title="How much of the repo to index">
+          <option value="quick">Quick · up to 400 KB</option>
+          <option value="full">Full · up to 2.5 MB</option>
+        </select>
         <button id="index-btn" type="submit">Index repo</button>
       </form>
       <div id="examples" class="examples">
@@ -55,6 +59,7 @@
         <div class="repo-banner">
           <span id="repo-label"></span>
           <span id="repo-stats" class="muted"></span>
+          <button id="more-btn" class="ghost small" type="button" hidden></button>
         </div>
         <div id="messages" class="messages" aria-live="polite"></div>
         <form id="ask-form" class="ask-form">

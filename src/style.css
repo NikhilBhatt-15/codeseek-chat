@@ -56,6 +56,7 @@ button {
 button:disabled { opacity: 0.55; cursor: not-allowed; }
 button.ghost { background: transparent; color: var(--ink); border-color: var(--line); }
 button.small { padding: 0.25rem 0.6rem; font-size: 0.85rem; }
+select,
 input, textarea {
   font: inherit;
   color: var(--ink);
@@ -88,6 +89,8 @@ input:focus-visible, textarea:focus-visible, button:focus-visible { outline: 2px
 
 .repo-form { display: flex; gap: 8px; }
 .repo-form button { white-space: nowrap; }
+.repo-form select { width: auto; flex: none; cursor: pointer; }
+#more-btn { margin-left: auto; }
 .examples { margin: 10px 0 0; font-size: 0.86rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .examples button { background: transparent; color: var(--muted); border: 1px dashed var(--line); font-weight: 500; padding: 0.15rem 0.55rem; font-family: var(--mono); font-size: 0.8rem; }
 

@@ -1,7 +1,7 @@
 // Build, search and cache a repository's embedding index.
 import { chunkText, DEFAULT_CHUNKING } from './chunking';
 import { formatDocument } from './embedder';
-import type { RepoSnapshot } from './github';
+import type { IndexSize, RepoFile, RepoSnapshot } from './github';
 import { EMBED_DIM, INDEX_VERSION, MODEL_ID } from './protocol';
 
 export interface IndexedChunk {
@@ -19,7 +19,11 @@ export interface RepoIndex {
   commit: string;
   chunks: IndexedChunk[];
   vectors: Float32Array; // chunks.length × EMBED_DIM, row-major, L2-normalised
-  files: number;
+  paths: string[]; // files covered (including ones that produced no chunks)
+  size: IndexSize;
+  skipped: number; // files left out by the size limit
+  skippedBytes: number;
+  truncated: boolean;
   createdAt: number;
 }
 
@@ -91,24 +95,44 @@ export function dedupeHits(hits: Hit[]): Hit[] {
   return kept;
 }
 
-export function indexFromSnapshot(
+/** Builds a fresh index, or extends `base` (same commit) with newly indexed files. */
+export function buildIndex(
   snap: RepoSnapshot,
+  size: IndexSize,
   chunks: IndexedChunk[],
   vectors: Float32Array,
-  files: number,
+  paths: string[],
+  base?: RepoIndex,
 ): RepoIndex {
+  const merged = new Float32Array((base?.vectors.length ?? 0) + vectors.length);
+  if (base) merged.set(base.vectors);
+  merged.set(vectors, base?.vectors.length ?? 0);
   return {
     key: indexKey(snap.owner, snap.repo, snap.commit),
     owner: snap.owner,
     repo: snap.repo,
-    branch: snap.branch,
+    branch: base?.branch ?? snap.branch,
     commit: snap.commit,
-    chunks,
-    vectors,
-    files,
+    chunks: [...(base?.chunks ?? []), ...chunks],
+    vectors: merged,
+    paths: [...(base?.paths ?? []), ...paths].sort(),
+    size,
+    skipped: snap.skipped,
+    skippedBytes: snap.skippedBytes,
+    truncated: snap.truncated,
     createdAt: Date.now(),
   };
 }
+
+/** Files in the snapshot that `index` does not cover yet. */
+export function missingFiles(snap: RepoSnapshot, index: RepoIndex | null): RepoFile[] {
+  if (!index) return snap.files;
+  const have = new Set(index.paths);
+  return snap.files.filter((f) => !have.has(f.path));
+}
+
+/** Code averages roughly one chunk per KB (measured on several repos). */
+export const estimateChunks = (bytes: number) => Math.max(1, Math.round(bytes / 1000));
 
 // ---- IndexedDB cache (best effort: the app works without it) ----
 
