@@ -93,7 +93,7 @@ describe('fetchSnapshot', () => {
 
   it('explains rate limiting and missing repos', async () => {
     const limited = (async () => json({}, 403, { 'x-ratelimit-reset': '0' })) as unknown as typeof fetch;
-    await expect(fetchSnapshot({ owner: 'o', repo: 'r' }, undefined, limited)).rejects.toThrow(/rate limit/);
+    await expect(fetchSnapshot({ owner: 'o', repo: 'r' }, undefined, limited)).rejects.toThrow('60 requests/hour per network');
     const missing = (async () => json({}, 404)) as unknown as typeof fetch;
     await expect(fetchSnapshot({ owner: 'o', repo: 'r' }, undefined, missing)).rejects.toBeInstanceOf(GitHubError);
   });
@@ -119,5 +119,26 @@ describe('fetchContents', () => {
     expect(out.get('f0.py')).toBe('text of f0.py');
     expect(out.get('bin.py')).toBeNull();
     expect(progress.at(-1)).toBe(11);
+  });
+});
+
+describe('authentication', () => {
+  it('sends the token only to the GitHub API and explains limits', async () => {
+    const seen: { url: string; auth?: string }[] = [];
+    const fake = (async (url: string, init?: RequestInit) => {
+      seen.push({ url, auth: (init?.headers as Record<string, string> | undefined)?.Authorization });
+      return url.includes('/commits/')
+        ? json({ sha: 's', html_url: 'https://github.com/o/r/commit/s' })
+        : json({ truncated: false, tree: [] });
+    }) as unknown as typeof fetch;
+    await fetchSnapshot({ owner: 'o', repo: 'r' }, undefined, fake, 'tok');
+    expect(seen.every((s) => s.auth === 'Bearer tok')).toBe(true);
+    await fetchSnapshot({ owner: 'o', repo: 'r' }, undefined, fake);
+    expect(seen.at(-1)!.auth).toBeUndefined();
+
+    const limited = (async () => json({}, 403)) as unknown as typeof fetch;
+    await expect(fetchSnapshot({ owner: 'o', repo: 'r' }, undefined, limited)).rejects.toThrow(/Add a GitHub token/);
+    const rejected = (async () => json({}, 401)) as unknown as typeof fetch;
+    await expect(fetchSnapshot({ owner: 'o', repo: 'r' }, undefined, rejected, 'bad')).rejects.toThrow(/rejected the token/);
   });
 });

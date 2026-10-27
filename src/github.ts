@@ -108,15 +108,22 @@ export function selectFiles(
   return { files, skipped: candidates.length - files.length };
 }
 
-async function api<T>(path: string, fetchImpl: typeof fetch): Promise<T> {
-  const res = await fetchImpl(`https://api.github.com${path}`, {
-    headers: { Accept: 'application/vnd.github+json' },
-  });
+async function api<T>(path: string, fetchImpl: typeof fetch, token?: string): Promise<T> {
+  const headers: Record<string, string> = { Accept: 'application/vnd.github+json' };
+  // Optional: authenticated requests get 5,000/hour instead of 60/hour per IP.
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetchImpl(`https://api.github.com${path}`, { headers });
+  if (res.status === 401) throw new GitHubError('GitHub rejected the token. Check or remove it in Settings.');
   if (res.status === 404) throw new GitHubError('Repository not found. Is it public?');
   if (res.status === 403 || res.status === 429) {
     const reset = Number(res.headers.get('x-ratelimit-reset'));
     const when = reset ? ` Try again after ${new Date(reset * 1000).toLocaleTimeString()}.` : '';
-    throw new GitHubError(`GitHub's rate limit for your network was reached (60 requests/hour).${when}`, true);
+    throw new GitHubError(
+      token
+        ? `GitHub's rate limit for your token was reached.${when}`
+        : `GitHub allows 60 requests/hour per network without a login, and that's used up.${when} Add a GitHub token in Settings to raise it to 5,000/hour.`,
+      true,
+    );
   }
   if (!res.ok) throw new GitHubError(`GitHub API error ${res.status}`);
   return (await res.json()) as T;
@@ -126,12 +133,14 @@ export async function fetchSnapshot(
   ref: RepoRef,
   limits: Limits = DEFAULT_LIMITS,
   fetchImpl: typeof fetch = fetch,
+  token?: string,
 ): Promise<RepoSnapshot> {
   const base = `/repos/${ref.owner}/${ref.repo}`;
   // HEAD resolves to the default branch's latest commit, saving a call to /repos/{o}/{r}.
   const commit = await api<{ sha: string; html_url: string }>(
     `${base}/commits/${encodeURIComponent(ref.ref ?? 'HEAD')}`,
     fetchImpl,
+    token,
   );
   // Canonical owner/repo casing, from https://github.com/<owner>/<repo>/commit/<sha>.
   const [, owner = ref.owner, repo = ref.repo] = new URL(commit.html_url).pathname.split('/');
@@ -139,6 +148,7 @@ export async function fetchSnapshot(
   const tree = await api<{ tree: { path: string; type: string; size?: number }[]; truncated: boolean }>(
     `${base}/git/trees/${commit.sha}?recursive=1`,
     fetchImpl,
+    token,
   );
   const blobs = tree.tree.filter((e) => e.type === 'blob').map((e) => ({ path: e.path, size: e.size ?? 0 }));
   const { files, skipped } = selectFiles(blobs, limits);

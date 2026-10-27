@@ -78,7 +78,16 @@
           Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.
           It's sent only to Google's API, straight from your browser.
         </p>
-        <label class="row"><input id="remember-input" type="checkbox" /> Remember the key on this device</label>
+        <label>
+          GitHub token <span class="muted">(optional)</span>
+          <input id="gh-input" type="password" autocomplete="off" spellcheck="false" placeholder="Raises GitHub's limit from 60 to 5,000 requests/hour" />
+        </label>
+        <p class="muted small">
+          Without a token, GitHub allows 60 requests an hour per network, and each repo uses 2.
+          <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create a fine-grained token</a>
+          with <em>Public repositories (read-only)</em> and no permissions. It's sent only to api.github.com.
+        </p>
+        <label class="row"><input id="remember-input" type="checkbox" /> Remember these on this device</label>
         <label>
           Model
           <input id="model-input" list="models" spellcheck="false" />

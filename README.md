@@ -51,6 +51,9 @@ codeseek's 21 files (72 chunks) took about 60 s, and each question's retrieval t
   are shown.
 - GitHub allows 60 unauthenticated API requests an hour per network, and each repo uses 2
   (cached repos too, to check for new commits).
+  An optional GitHub token in Settings raises this to 5,000 an hour. A fine-grained token with
+  *Public repositories (read-only)* access and no permissions is enough. If the limit is hit,
+  repos already cached in your browser still open.
 - Gemini's free tier has its own rate limits per key.
 - Without WebGPU, embedding runs on the CPU through WebAssembly and is several times slower.
 

@@ -28,6 +28,7 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 // ---- settings (per-device conveniences; storage may be unavailable) ----
 
 const KEY_STORAGE = 'codeseek-chat:gemini-key';
+const GH_TOKEN_STORAGE = 'codeseek-chat:github-token';
 const MODEL_STORAGE = 'codeseek-chat:model';
 const store = {
   get(key: string): string | null {
@@ -57,6 +58,7 @@ const store = {
 
 const settings = {
   apiKey: store.get(KEY_STORAGE) ?? '',
+  githubToken: store.get(GH_TOKEN_STORAGE) ?? '',
   model: store.get(MODEL_STORAGE) ?? DEFAULT_MODEL,
 };
 
@@ -123,7 +125,7 @@ async function indexRepo(input: string): Promise<void> {
   setStep(0, 'Listing files…', 0);
 
   try {
-    const snap = await fetchSnapshot(ref);
+    const snap = await fetchSnapshot(ref, undefined, undefined, settings.githubToken || undefined);
     signal.throwIfAborted();
     const cached = await loadCached(indexKey(snap.owner, snap.repo, snap.commit));
     if (cached) {
@@ -370,8 +372,9 @@ const models = $('models');
 models.replaceChildren(...SUGGESTED_MODELS.map((m) => Object.assign(el('option'), { value: m })));
 $('settings-btn').addEventListener('click', () => {
   $<HTMLInputElement>('key-input').value = settings.apiKey;
+  $<HTMLInputElement>('gh-input').value = settings.githubToken;
   $<HTMLInputElement>('model-input').value = settings.model;
-  $<HTMLInputElement>('remember-input').checked = store.persisted(KEY_STORAGE);
+  $<HTMLInputElement>('remember-input').checked = store.persisted(KEY_STORAGE) || store.persisted(GH_TOKEN_STORAGE);
   dialog.showModal();
 });
 dialog.addEventListener('close', () => {
@@ -380,6 +383,8 @@ dialog.addEventListener('close', () => {
   settings.apiKey = $<HTMLInputElement>('key-input').value.trim();
   settings.model = $<HTMLInputElement>('model-input').value.trim() || DEFAULT_MODEL;
   store.set(KEY_STORAGE, settings.apiKey || null, remember);
+  settings.githubToken = $<HTMLInputElement>('gh-input').value.trim();
+  store.set(GH_TOKEN_STORAGE, settings.githubToken || null, remember);
   store.set(MODEL_STORAGE, settings.model === DEFAULT_MODEL ? null : settings.model, true);
   updateModeNote();
 });
