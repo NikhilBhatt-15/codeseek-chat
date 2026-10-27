@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>codeseek chat</title>
+    <meta name="description" content="Chat with any public GitHub repository. Code is embedded in your browser with EmbeddingGemma 2. No server." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='13' cy='13' r='8' fill='none' stroke='%237ee787' stroke-width='4'/%3E%3Cpath d='M19 19l8 8' stroke='%237ee787' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header class="top">
+      <a class="brand" href="./">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="13" cy="13" r="8" /><path d="M19 19l8 8" /></svg>
+        codeseek <span>chat</span>
+      </a>
+      <nav>
+        <a href="https://github.com/NikhilBhatt-15/codeseek-chat" target="_blank" rel="noopener">Source</a>
+        <button id="settings-btn" class="ghost" type="button">Settings</button>
+      </nav>
+    </header>
+
+    <main>
+      <section id="intro" class="intro">
+        <h1>Ask any GitHub repo a question.</h1>
+        <p>
+          The code is embedded <strong>in your browser</strong> with Google's
+          <a href="https://huggingface.co/google/embeddinggemma-2" target="_blank" rel="noopener">EmbeddingGemma&nbsp;2</a>.
+          There's no server. Answers come from Gemini using your own free API key, and without a key you still get semantic search.
+        </p>
+      </section>
+
+      <form id="repo-form" class="repo-form" autocomplete="off">
+        <input id="repo-input" name="repo" placeholder="owner/repo or https://github.com/owner/repo" aria-label="GitHub repository" required />
+        <button id="index-btn" type="submit">Index repo</button>
+      </form>
+      <div id="examples" class="examples">
+        Try:
+        <button type="button" data-repo="NikhilBhatt-15/codeseek">NikhilBhatt-15/codeseek</button>
+        <button type="button" data-repo="sindresorhus/ky">sindresorhus/ky</button>
+        <button type="button" data-repo="pallets/itsdangerous">pallets/itsdangerous</button>
+      </div>
+
+      <section id="progress" class="progress" hidden>
+        <div class="progress-head">
+          <strong id="progress-title">Indexing…</strong>
+          <button id="cancel-btn" class="ghost small" type="button">Cancel</button>
+        </div>
+        <ol id="steps" class="steps"></ol>
+        <div class="bar"><div id="bar-fill"></div></div>
+        <p id="progress-note" class="muted"></p>
+      </section>
+
+      <section id="chat" class="chat" hidden>
+        <div class="repo-banner">
+          <span id="repo-label"></span>
+          <span id="repo-stats" class="muted"></span>
+        </div>
+        <div id="messages" class="messages" aria-live="polite"></div>
+        <form id="ask-form" class="ask-form">
+          <textarea id="ask-input" rows="1" placeholder="Ask about the code…" aria-label="Question"></textarea>
+          <button id="ask-btn" type="submit">Ask</button>
+        </form>
+        <p id="mode-note" class="muted small"></p>
+      </section>
+
+      <p id="error" class="error" role="alert" hidden></p>
+    </main>
+
+    <dialog id="settings">
+      <form method="dialog" class="settings-form">
+        <h2>Settings</h2>
+        <label>
+          Gemini API key
+          <input id="key-input" type="password" autocomplete="off" spellcheck="false" placeholder="Paste a key to get answers" />
+        </label>
+        <p class="muted small">
+          Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.
+          It's sent only to Google's API, straight from your browser.
+        </p>
+        <label class="row"><input id="remember-input" type="checkbox" /> Remember the key on this device</label>
+        <label>
+          Model
+          <input id="model-input" list="models" spellcheck="false" />
+          <datalist id="models"></datalist>
+        </label>
+        <p class="muted small">
+          Privacy: indexing runs locally. When you ask a question with a key set, your question and the matching
+          code excerpts are sent to Google's Gemini API. Without a key, nothing leaves your browser except
+          downloads from GitHub and Hugging Face.
+        </p>
+        <div class="row end">
+          <button value="cancel" class="ghost" type="submit">Close</button>
+          <button id="save-settings" value="save" type="submit">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <footer class="foot muted small">
+      Built by <a href="https://nikhilbhatt-15.github.io" target="_blank" rel="noopener">Nikhil Bhatt</a> on
+      <a href="https://github.com/NikhilBhatt-15/codeseek" target="_blank" rel="noopener">codeseek</a>.
+    </footer>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

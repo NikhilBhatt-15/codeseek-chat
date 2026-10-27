@@ -1,0 +1,25 @@
+{
+  "name": "codeseek-chat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chat with any public GitHub repo. Embeddings run in your browser with EmbeddingGemma 2.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "4.3.1",
+    "dompurify": "3.4.17",
+    "marked": "18.1.1"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vite": "8.3.4",
+    "vitest": "5.0.4"
+  }
+}
