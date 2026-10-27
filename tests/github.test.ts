@@ -53,12 +53,13 @@ const json = (body: unknown, status = 200, headers: Record<string, string> = {})
   new Response(JSON.stringify(body), { status, headers });
 
 describe('fetchSnapshot', () => {
-  it('resolves the default branch and commit, then filters the tree', async () => {
+  it('resolves the default branch commit and filters the tree in two API calls', async () => {
     const calls: string[] = [];
     const fake = (async (url: string) => {
       calls.push(url);
-      if (url.endsWith('/repos/O/R')) return json({ default_branch: 'main', full_name: 'Owner/Repo' });
-      if (url.includes('/commits/main')) return json({ sha: 'c0ffee' });
+      if (url.endsWith('/repos/o/r/commits/HEAD')) {
+        return json({ sha: 'c0ffee', html_url: 'https://github.com/Owner/Repo/commit/c0ffee' });
+      }
       if (url.includes('/git/trees/c0ffee')) {
         return json({
           truncated: false,
@@ -70,11 +71,24 @@ describe('fetchSnapshot', () => {
         });
       }
       throw new Error(`unexpected ${url}`);
-    }) as typeof fetch;
-    const snap = await fetchSnapshot({ owner: 'O', repo: 'R' }, undefined, fake);
-    expect(snap).toMatchObject({ owner: 'Owner', repo: 'Repo', branch: 'main', commit: 'c0ffee', skipped: 0 });
+    }) as unknown as typeof fetch;
+    const snap = await fetchSnapshot({ owner: 'o', repo: 'r' }, undefined, fake);
+    expect(snap).toMatchObject({ owner: 'Owner', repo: 'Repo', branch: null, commit: 'c0ffee', skipped: 0 });
     expect(snap.files.map((f) => f.path)).toEqual(['src/a.py']);
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('uses the ref from the URL when given', async () => {
+    const calls: string[] = [];
+    const fake = (async (url: string) => {
+      calls.push(url);
+      return url.includes('/commits/')
+        ? json({ sha: 's', html_url: 'https://github.com/o/r/commit/s' })
+        : json({ truncated: false, tree: [] });
+    }) as unknown as typeof fetch;
+    const snap = await fetchSnapshot({ owner: 'o', repo: 'r', ref: 'feature/x' }, undefined, fake);
+    expect(calls[0]).toContain('/commits/feature%2Fx');
+    expect(snap.branch).toBe('feature/x');
   });
 
   it('explains rate limiting and missing repos', async () => {

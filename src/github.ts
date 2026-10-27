@@ -1,5 +1,5 @@
 // Fetch a public GitHub repository's source files without a backend.
-// Three GitHub API calls per repo (repo, branch, tree); file contents come from
+// Two GitHub API calls per repo (commit, tree); file contents come from
 // raw.githubusercontent.com, which does not count against the 60/hour API limit.
 
 export interface RepoRef {
@@ -11,7 +11,7 @@ export interface RepoRef {
 export interface RepoSnapshot {
   owner: string;
   repo: string;
-  branch: string;
+  branch: string | null; // null = default branch
   commit: string;
   files: RepoFile[];
   skipped: number; // indexable-looking files left out because of the size limits
@@ -29,7 +29,9 @@ export interface Limits {
   maxTotalBytes: number;
 }
 
-export const DEFAULT_LIMITS: Limits = { maxFiles: 400, maxFileBytes: 200_000, maxTotalBytes: 2_500_000 };
+// Sized so a first index takes a few minutes at most on a laptop GPU (~2 chunks/s on an
+// Intel iGPU, ~1 chunk per 1 KB of code). Source is kept first; big test suites are dropped.
+export const DEFAULT_LIMITS: Limits = { maxFiles: 300, maxFileBytes: 100_000, maxTotalBytes: 400_000 };
 
 // Same rules as codeseek's discovery.py.
 const SKIP_DIRS = new Set([
@@ -51,7 +53,14 @@ const SKIP_FILENAMES = new Set([
   'composer.lock', 'Gemfile.lock', 'go.sum',
 ]);
 
-export class GitHubError extends Error {}
+export class GitHubError extends Error {
+  constructor(
+    message: string,
+    readonly rateLimited = false,
+  ) {
+    super(message);
+  }
+}
 
 /** Accepts "owner/repo", github.com URLs (optionally with /tree/<ref>), and .git URLs. */
 export function parseRepo(input: string): RepoRef | null {
@@ -107,7 +116,7 @@ async function api<T>(path: string, fetchImpl: typeof fetch): Promise<T> {
   if (res.status === 403 || res.status === 429) {
     const reset = Number(res.headers.get('x-ratelimit-reset'));
     const when = reset ? ` Try again after ${new Date(reset * 1000).toLocaleTimeString()}.` : '';
-    throw new GitHubError(`GitHub's rate limit for your network was reached (60 requests/hour).${when}`);
+    throw new GitHubError(`GitHub's rate limit for your network was reached (60 requests/hour).${when}`, true);
   }
   if (!res.ok) throw new GitHubError(`GitHub API error ${res.status}`);
   return (await res.json()) as T;
@@ -119,10 +128,14 @@ export async function fetchSnapshot(
   fetchImpl: typeof fetch = fetch,
 ): Promise<RepoSnapshot> {
   const base = `/repos/${ref.owner}/${ref.repo}`;
-  const info = await api<{ default_branch: string; full_name: string }>(base, fetchImpl);
-  const [owner, repo] = info.full_name.split('/') as [string, string];
-  const branch = ref.ref ?? info.default_branch;
-  const commit = await api<{ sha: string }>(`${base}/commits/${encodeURIComponent(branch)}`, fetchImpl);
+  // HEAD resolves to the default branch's latest commit, saving a call to /repos/{o}/{r}.
+  const commit = await api<{ sha: string; html_url: string }>(
+    `${base}/commits/${encodeURIComponent(ref.ref ?? 'HEAD')}`,
+    fetchImpl,
+  );
+  // Canonical owner/repo casing, from https://github.com/<owner>/<repo>/commit/<sha>.
+  const [, owner = ref.owner, repo = ref.repo] = new URL(commit.html_url).pathname.split('/');
+  const branch = ref.ref ?? null;
   const tree = await api<{ tree: { path: string; type: string; size?: number }[]; truncated: boolean }>(
     `${base}/git/trees/${commit.sha}?recursive=1`,
     fetchImpl,

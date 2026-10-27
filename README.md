@@ -29,11 +29,10 @@ command-line tool, and uses the same chunking rules.
 
 ## How it works
 
-1. **Read the repo.** Three GitHub API calls resolve the default branch, its commit and the
-   file tree. File contents come from `raw.githubusercontent.com`, which doesn't count toward
+1. **Read the repo.** Two GitHub API calls resolve the latest commit and the file tree. File contents come from `raw.githubusercontent.com`, which doesn't count toward
    GitHub's limit of 60 API requests an hour.
-2. **Pick files.** It keeps source files up to 400 files and 2.5 MB, preferring code over docs
-   and tests. Vendored code, lockfiles, minified files and binaries are skipped, as in the CLI.
+2. **Pick files.** It keeps up to 300 files and 400 KB (about 400 chunks, a few minutes on a
+   laptop GPU), preferring code over docs and tests. Vendored code, lockfiles, minified files and binaries are skipped, as in the CLI.
 3. **Chunk.** Files are split at top-level declarations, with overlapping windows for long
    blocks. This is a TypeScript port of codeseek's chunker, checked by the same tests.
 4. **Embed.** A Web Worker loads only the 270M text encoder (q4, about 175 MB, downloaded
@@ -50,7 +49,8 @@ codeseek's 21 files (72 chunks) took about 60 s, and each question's retrieval t
 
 - Public repositories only. Very large repos are sampled: the file count and skipped files
   are shown.
-- GitHub allows 60 unauthenticated API requests an hour per network, and each repo uses 3.
+- GitHub allows 60 unauthenticated API requests an hour per network, and each repo uses 2
+  (cached repos too, to check for new commits).
 - Gemini's free tier has its own rate limits per key.
 - Without WebGPU, embedding runs on the CPU through WebAssembly and is several times slower.
 

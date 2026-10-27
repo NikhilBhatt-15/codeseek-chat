@@ -15,7 +15,7 @@ export interface RepoIndex {
   key: string;
   owner: string;
   repo: string;
-  branch: string;
+  branch: string | null; // null = default branch
   commit: string;
   chunks: IndexedChunk[];
   vectors: Float32Array; // chunks.length × EMBED_DIM, row-major, L2-normalised
@@ -139,6 +139,22 @@ function tx<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T
 export async function loadCached(key: string): Promise<RepoIndex | null> {
   try {
     return ((await tx('readonly', (s) => s.get(key))) as RepoIndex | undefined) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Newest cached index for a repo at any commit: a fallback when GitHub can't be reached. */
+export async function loadLatestCached(owner: string, repo: string): Promise<RepoIndex | null> {
+  try {
+    const all = (await tx('readonly', (s) => s.getAll())) as RepoIndex[];
+    const prefix = `${owner}/${repo}@`.toLowerCase();
+    const suffix = indexKey('', '', '').slice(2); // "#v<version>:<model>:<dim>"
+    return (
+      all
+        .filter((i) => i.key.startsWith(prefix) && i.key.endsWith(suffix))
+        .sort((a, b) => b.createdAt - a.createdAt)[0] ?? null
+    );
   } catch {
     return null;
   }

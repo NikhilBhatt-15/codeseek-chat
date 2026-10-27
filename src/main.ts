@@ -10,6 +10,7 @@ import {
   indexFromSnapshot,
   indexKey,
   loadCached,
+  loadLatestCached,
   saveCached,
   search,
   type Hit,
@@ -184,6 +185,13 @@ async function indexRepo(input: string): Promise<void> {
       $('progress').hidden = true;
       return;
     }
+    if (err instanceof GitHubError && err.rateLimited) {
+      const fallback = await loadLatestCached(ref.owner, ref.repo);
+      if (fallback) {
+        openChat(fallback, 'cached copy: GitHub rate limit reached, so newer commits were not checked');
+        return;
+      }
+    }
     $('progress').hidden = true;
     showError(err instanceof Error ? err.message : String(err));
   } finally {
@@ -212,7 +220,7 @@ function openChat(built: RepoIndex, note: string): void {
   link.setAttribute('href', `https://github.com/${built.owner}/${built.repo}/tree/${built.commit}`);
   link.setAttribute('target', '_blank');
   link.setAttribute('rel', 'noopener');
-  label.replaceChildren(link, ` @ ${built.branch} (${built.commit.slice(0, 7)})`);
+  label.replaceChildren(link, ` @ ${built.branch ?? built.commit.slice(0, 7)}${built.branch ? ` (${built.commit.slice(0, 7)})` : ''}`);
   $('repo-stats').textContent = [`${plural(built.files, 'file')}, ${plural(built.chunks.length, 'chunk')}`, note]
     .filter(Boolean)
     .join(' · ');
