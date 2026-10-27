@@ -36,7 +36,8 @@ export type IndexSize = 'quick' | 'full';
 // first index to a few minutes; Full takes everything up to the old browser-friendly cap.
 // Either way source is kept first, so it is big test suites and docs that get dropped.
 export const LIMITS: Record<IndexSize, Limits> = {
-  quick: { maxFiles: 300, maxFileBytes: 100_000, maxTotalBytes: 400_000 },
+  // Same per-file cap in both, so files Quick leaves out are all counted in `skipped`.
+  quick: { maxFiles: 300, maxFileBytes: 200_000, maxTotalBytes: 400_000 },
   full: { maxFiles: 400, maxFileBytes: 200_000, maxTotalBytes: 2_500_000 },
 };
 export const DEFAULT_LIMITS = LIMITS.quick;

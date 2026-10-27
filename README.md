@@ -23,6 +23,7 @@ command-line tool, and uses the same chunking rules.
   header. It's kept for the session, or on this device if you choose.
 - **Cited answers.** `[1]`, `[2]` markers link to the exact lines on GitHub, and the excerpts
   used are shown under each answer.
+- **Quick or Full.** Start small and extend later without re-embedding what's done.
 - **Fast revisits.** Indexes are cached in IndexedDB per commit. Reopening a repo takes about 2 s.
 - **Follow-up questions.** Short follow-ups ("and where is it called?") reuse the previous
   question for retrieval.
@@ -31,8 +32,10 @@ command-line tool, and uses the same chunking rules.
 
 1. **Read the repo.** Two GitHub API calls resolve the latest commit and the file tree. File contents come from `raw.githubusercontent.com`, which doesn't count toward
    GitHub's limit of 60 API requests an hour.
-2. **Pick files.** It keeps up to 300 files and 400 KB (about 400 chunks, a few minutes on a
-   laptop GPU), preferring code over docs and tests. Vendored code, lockfiles, minified files and binaries are skipped, as in the CLI.
+2. **Pick files.** Code over docs and tests, within the size you choose: **Quick** (up to
+   400 KB, about 400 chunks, a few minutes on a laptop GPU) or **Full** (up to 2.5 MB).
+   A Quick index offers **Index the rest**, which adds just the skipped files at the same
+   commit. Time estimates use your device's measured speed. Vendored code, lockfiles, minified files and binaries are skipped, as in the CLI.
 3. **Chunk.** Files are split at top-level declarations, with overlapping windows for long
    blocks. This is a TypeScript port of codeseek's chunker, checked by the same tests.
 4. **Embed.** A Web Worker loads only the 270M text encoder (q4, about 175 MB, downloaded

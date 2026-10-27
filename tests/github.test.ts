@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { blobUrl, fetchContents, fetchSnapshot, GitHubError, isIndexable, parseRepo, rawUrl, selectFiles } from '../src/github';
+import { blobUrl, fetchContents, fetchSnapshot, GitHubError, isIndexable, LIMITS, parseRepo, rawUrl, selectFiles } from '../src/github';
 
 describe('parseRepo', () => {
   it.each([
@@ -141,5 +141,19 @@ describe('authentication', () => {
     await expect(fetchSnapshot({ owner: 'o', repo: 'r' }, undefined, limited)).rejects.toThrow(/Add a GitHub token/);
     const rejected = (async () => json({}, 401)) as unknown as typeof fetch;
     await expect(fetchSnapshot({ owner: 'o', repo: 'r' }, undefined, rejected, 'bad')).rejects.toThrow(/rejected the token/);
+  });
+});
+
+describe('size presets', () => {
+  it('counts every file Full would add as skipped by Quick', () => {
+    const entries = [
+      ...Array.from({ length: 6 }, (_, i) => ({ path: `src/m${i}.ts`, size: 90_000 })),
+      { path: 'src/big.ts', size: 150_000 }, // over the old 100 KB quick cap
+    ];
+    const quick = selectFiles(entries, LIMITS.quick);
+    const full = selectFiles(entries, LIMITS.full);
+    expect(full.skipped).toBe(0);
+    expect(quick.files.length + quick.skipped).toBe(full.files.length);
+    expect(quick.skippedBytes).toBe(entries.reduce((s, f) => s + f.size, 0) - quick.files.reduce((s, f) => s + f.size, 0));
   });
 });
