@@ -24,7 +24,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      # No install scripts: they only fetch native onnxruntime-node binaries, which the
+      # browser build never uses, and that download can time out.
+      - run: npm ci --ignore-scripts
       - run: npm test
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
