@@ -15,6 +15,11 @@ export interface Example {
   repo: string;
   blurb: string;
   questions: ExampleQuestion[];
+  /**
+   * Names for the code map's topics, by cluster id (biggest cluster first). Written from each
+   * cluster's files and identifiers; the clustering is seeded, so ids are stable for this index.
+   */
+  topics: string[];
 }
 
 /** Shape of public/examples/<owner>__<repo>.json. */
@@ -35,6 +40,16 @@ export const EXAMPLES: Example[] = [
   {
     repo: 'sindresorhus/ky',
     blurb: 'HTTP client for fetch',
+    topics: [
+      'HTTP behaviour tests',
+      'error & option tests',
+      'options & context',
+      'bodies, streams & errors',
+      'retry logic',
+      'schema validation',
+      'retry timing tests',
+      'option merging',
+    ],
     questions: [
       {
         question: 'Where does ky decide whether to retry a failed request?',
@@ -53,6 +68,7 @@ export const EXAMPLES: Example[] = [
   {
     repo: 'pallets/itsdangerous',
     blurb: 'signed data for Python',
+    topics: ['serializers', 'build & docs setup', 'signing & keys', 'timestamps & expiry'],
     questions: [
       {
         question: 'How is a signature verified?',
@@ -67,6 +83,7 @@ export const EXAMPLES: Example[] = [
   {
     repo: 'NikhilBhatt-15/codeseek',
     blurb: 'semantic code search CLI',
+    topics: ['embedding backends', 'tests', 'index storage', 'CLI & MCP server'],
     questions: [
       {
         question: 'How are files split into chunks?',

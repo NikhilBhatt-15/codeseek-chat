@@ -276,10 +276,10 @@ details.data-table summary { cursor: pointer; color: var(--muted); font-size: 0.
 .map-svg { width: 100%; height: auto; display: block; background: var(--code-bg); border: 1px solid var(--line); border-radius: var(--radius); margin-top: 6px; touch-action: manipulation; }
 .map-svg .dot { stroke: var(--panel); stroke-width: 1.5; cursor: pointer; transition: opacity 0.2s, r 0.2s; }
 .map-svg .dot:hover { stroke: var(--ink); stroke-width: 2; }
-.map-svg .dot.dim { opacity: 0.15; }
+.map-svg .dot.dim { opacity: 0.4; }
 .map-svg .dot.hit { stroke: var(--ink); stroke-width: 3; }
 .map-svg .map-labels text { font: 600 15px var(--sans); fill: var(--ink); paint-order: stroke; stroke: var(--code-bg); stroke-width: 5px; stroke-linejoin: round; pointer-events: none; }
-.map-svg .map-labels text.dim { opacity: 0.25; }
+.map-svg .map-labels text.dim { opacity: 0.45; }
 .dot.c0, .swatch.c0 { fill: var(--c0); background: var(--c0); }
 .dot.c1, .swatch.c1 { fill: var(--c1); background: var(--c1); }
 .dot.c2, .swatch.c2 { fill: var(--c2); background: var(--c2); }

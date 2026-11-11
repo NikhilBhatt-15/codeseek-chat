@@ -9,6 +9,8 @@ export interface MapOptions {
   model: () => string;
   blobUrl: (path: string, start?: number, end?: number) => string;
   onAsk: (question: string) => void;
+  /** Hand-written topic names for a pre-built example index, by cluster id. */
+  topics?: string[];
 }
 
 interface Layout {
@@ -183,6 +185,11 @@ export function renderMap(panel: HTMLElement, index: RepoIndex, opts: MapOptions
   void layouts.get(index.key)!.then(
     async (l) => {
       layout = l;
+      const preset = opts.topics;
+      if (preset && preset.length === l.clusters.length) {
+        for (const c of l.clusters) c.name = preset[c.id]!;
+        named = true;
+      }
       draw();
       const key = opts.apiKey();
       if (key && !named) {

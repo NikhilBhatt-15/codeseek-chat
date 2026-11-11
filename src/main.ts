@@ -983,6 +983,7 @@ async function openMap(): Promise<void> {
       apiKey: () => settings.apiKey,
       model: () => settings.model,
       blobUrl: (path, start, end) => blobUrl(current, path, start, end),
+      topics: example?.index === current ? example.example.topics : undefined,
       onAsk: (q) => {
         showTab('ask');
         void ask(q);
