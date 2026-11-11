@@ -1,0 +1,16 @@
+{
+ "date": "2026-11-11",
+ "judge": null,
+ "systems": [
+  {
+   "system": "Qwen3.5 0.8B (offline, q4)",
+   "citesRight": 0.609375,
+   "eligible": 64,
+   "validCitations": 0.96875,
+   "anyCitation": 0.71875,
+   "judgeMean": null,
+   "judgeAtLeast4": null,
+   "cpuTokensPerSecond": 4.998270632462094
+  }
+ ]
+}

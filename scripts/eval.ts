@@ -223,6 +223,7 @@ function addRow(config: string, variant: string, rank: (repo: string, q: Benchma
 addRow('BM25 only', '-', (repo, q) => bm25.get(repo)!.search(q.question, POOL));
 
 const rerankRanked = new Map<string, Ranked[]>();
+const firstPlace: { label: string; counts: Record<string, number> }[] = [];
 for (const variant of VARIANTS) {
   let model: Promise<(t: string[]) => Promise<Float32Array>> | null = null;
   const getModel = () => (model ??= loadModel(variant));
@@ -248,14 +249,32 @@ for (const variant of VARIANTS) {
     const hybrid = (repo: string, q: Benchmark['questions'][number]) => rrf([dense(repo, q), bm25.get(repo)!.search(q.question, POOL)]);
     addRow(`Hybrid ${dim}d (RRF)`, variant, hybrid);
     addRow(`Routed ${dim}d (hybrid if code-like)`, variant, (repo, q) => (looksLikeCode(q.question) ? hybrid(repo, q) : dense(repo, q)));
-    if (rerank && dim === 256 && variant === VARIANTS[0]) {
+    // The reranker reorders the shipped ranking's own top 20, so the only difference from
+    // "Embeddings 768d" is the reranker.
+    if (rerank && dim === FULL_DIM && variant === VARIANTS[0]) {
       for (const q of bench.questions) {
         const c = corpora.get(q.repo)!;
-        const pool = rrf([dense(q.repo, q), bm25.get(q.repo)!.search(q.question, POOL)]).slice(0, 20);
+        const pool = dense(q.repo, q).slice(0, 20);
         const s = await rerank(q.question, pool.map((r) => `${c.chunks[r.index]!.path}\n${c.chunks[r.index]!.text}`));
         rerankRanked.set(q.question, pool.map((r, i) => ({ index: r.index, score: s[i]! })).sort((a, b) => b.score - a.score));
       }
-      addRow(`Hybrid ${dim}d + rerank top 20`, variant, (_repo, q) => rerankRanked.get(q.question)!);
+      addRow(`Embeddings ${dim}d + rerank top 20`, variant, (_repo, q) => rerankRanked.get(q.question)!);
+      // What lands first: implementation code, tests, or prose (docs, README, changelog)?
+      const kindOf = (path: string) =>
+        /\.(md|mdx|rst|txt)$/i.test(path) || /(^|\/)docs?\//i.test(path)
+          ? 'prose'
+          : /(^|\/)(tests?|__tests__|spec|test-d)\/|[._-](test|spec)\./i.test(path)
+            ? 'tests'
+            : 'code';
+      const firstKinds = (rank: (q: Benchmark['questions'][number]) => Ranked[]) => {
+        const counts: Record<string, number> = { code: 0, tests: 0, prose: 0 };
+        for (const q of bench.questions) counts[kindOf(corpora.get(q.repo)!.chunks[rank(q)[0]!.index]!.path)]!++;
+        return counts;
+      };
+      firstPlace.push(
+        { label: `Embeddings ${dim}d`, counts: firstKinds((q) => dense(q.repo, q)) },
+        { label: `Embeddings ${dim}d + rerank top 20`, counts: firstKinds((q) => rerankRanked.get(q.question)!) },
+      );
     }
   }
 }
@@ -289,6 +308,9 @@ const report = [
   repoHeader,
   ...repoLines,
   '',
+  ...(firstPlace.length
+    ? ['What each ranks first (questions whose top chunk is implementation code, tests, or prose):', '', '| Retriever | code | tests | prose |', '|---|---|---|---|', ...firstPlace.map((f) => `| ${f.label} | ${f.counts.code} | ${f.counts.tests} | ${f.counts.prose} |`), '']
+    : []),
   ...(speed.length ? ['Embedding speed on this machine\'s CPU (chunks/s):', '', '| Model | chunks/s |', '|---|---|', ...[...new Set(speed)]] : []),
 ].join('\n');
 console.log(`\n${report}`);
@@ -297,5 +319,6 @@ const tag = process.env.TAG ?? VARIANTS.join('-');
 writeFileSync(join(evalDir, 'results', `${tag}.md`), `${report}\n`);
 writeJson(join(evalDir, 'results', `${tag}.json`), {
   date: new Date().toISOString().slice(0, 10),
+  firstPlace,
   rows: rows.map((r) => ({ config: r.config, variant: r.variant, scores: r.scores, byRepo: r.byRepo, byKind: r.byKind, chunksPerSecond: r.chunksPerSecond, misses: bench.questions.filter((_, i) => r.perQuestion[i]!['hit@5'] === 0).map((q) => q.question) })),
 });

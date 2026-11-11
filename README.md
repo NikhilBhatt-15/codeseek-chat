@@ -110,7 +110,7 @@ All with the shipped model (EmbeddingGemma 2, q4):
 | Hybrid 768d: embeddings + BM25, reciprocal rank fusion | 0.63 | 0.92 | 0.95 | 0.77 |
 | Hybrid 256d | 0.59 | 0.90 | 0.97 | 0.74 |
 | Routed 768d: hybrid only for code-like queries | 0.66 | 0.94 | 1.00 | 0.80 |
-| Hybrid 256d + cross-encoder rerank of top 20 (ms-marco-MiniLM-L-6) | 0.44 | 0.87 | 0.91 | 0.63 |
+| Embeddings 768d, then its top 20 reranked by a cross-encoder (ms-marco-MiniLM-L-6) | 0.50 | 0.87 | 0.94 | 0.68 |
 
 recall@5 by question kind:
 
@@ -124,12 +124,15 @@ What this changed in the app:
 
 - **Hybrid search didn't earn its place.** The textbook upgrade, BM25 + reciprocal rank fusion,
   was slightly *worse* than embeddings alone (MRR 0.77 vs 0.81), and it lost a cross-file
-  question (recall@5 0.83 vs 1.00 on that kind). BM25 only wins on pasted error
-  messages (6/6 vs 5/6). That's one question, too few to justify the cost everywhere, so exact
-  matching moved to where it is reliable: the agent's `find_references` tool.
-- **The reranker hurt badly** (recall@1 0.64 → 0.44, MRR 0.74 → 0.63 against the ranking it
-  reordered). ms-marco-MiniLM is trained on web search queries, not code, and a general-purpose
-  reranker of that size was a net loss here, so the app doesn't use one.
+  question (recall@5 0.83 vs 1.00 on that kind). BM25 *alone* wins on pasted error messages
+  (6/6 vs 5/6), but mixing it in as hybrid didn't help even there (5/6). Exact matching moved to
+  where it is reliable: the agent's `find_references` tool.
+- **This reranker hurt a lot.** Reordering the shipped ranking's own top 20 with
+  ms-marco-MiniLM-L-6, the right file came first for 53% of questions instead of 72% (hit@1),
+  and MRR fell from 0.81 to 0.68. It mostly promoted tests: a test file was ranked first for 13
+  questions instead of 6 (implementation code: 46 instead of 55). That model is trained on web
+  search passages, not code, so this is a result about *a web-trained reranker*, not rerankers
+  in general. A code-trained one (bge-reranker-v2-m3, for example) wasn't tested and might help.
 - **768 dims instead of 256.** With the shipped q4 model, the full vector beat the Matryoshka
   prefix on every metric (recall@1 +4 points, MRR +4). At the other precisions 768 still wins
   on recall@1 and MRR, while recall@5 is mixed. The cost is 3× the vector storage (about 1 MB for
@@ -149,6 +152,19 @@ The same model at four precisions (768 dims, same 64 questions):
 **The 4-bit model is 6× smaller than full precision and lost nothing measurable.** It scored
 within one question of fp32 on every metric. For a model every visitor downloads, that's the
 whole difference between a usable first visit and a 1 GB wait.
+
+### Answer quality: offline model
+
+`npm run eval:answers` gives every system the same top 8 excerpts for each of the 64 questions
+and scores the written answers.
+
+| System | Cites the right file¹ | Valid citations | Speed |
+|---|---|---|---|
+| Qwen3.5 0.8B, offline (q4) | 61% | 97% | 5 tokens/s on a laptop CPU |
+
+¹ Of the questions where retrieval put an answer file in the top 8, the share whose answer cites
+an excerpt from that file. The comparison with Gemini (and a Gemini-judged quality score) runs
+when `GEMINI_API_KEY` is set.
 
 Caveats: 64 questions is small, so one question moves recall@5 by about 1.6 points. Differences
 under ~3 points are noise. I wrote the questions and labels myself, knowing the code. The numbers

@@ -31,11 +31,12 @@ const RETRIEVERS: { config: string; variant: string; label: string; note: string
   { config: 'Embeddings 128d', variant: 'q4', label: 'Embeddings, 128 dims', note: '' },
   { config: 'Routed 768d (hybrid if code-like)', variant: 'q4', label: 'Hybrid only for code-like queries', note: '' },
   { config: 'Hybrid 768d (RRF)', variant: 'q4', label: 'Hybrid: embeddings + BM25 (RRF)', note: '' },
-  { config: 'Hybrid 256d + rerank top 20', variant: 'q4', label: 'Hybrid + cross-encoder rerank', note: '' },
+  { config: 'Embeddings 768d + rerank top 20', variant: 'q4', label: 'Embeddings + web-trained reranker', note: '' },
   { config: 'BM25 only', variant: '-', label: 'BM25 keyword search only', note: '' },
 ];
 const METRICS: { key: string; label: string; help: string }[] = [
   { key: 'MRR@10', label: 'MRR@10', help: '1 / rank of the first right chunk, averaged (1.0 = always first)' },
+  { key: 'hit@1', label: 'hit@1', help: 'share of questions whose first result is from a right file' },
   { key: 'recall@1', label: 'recall@1', help: 'share of answer files found in the first chunk' },
   { key: 'recall@5', label: 'recall@5', help: 'share of answer files found in the top 5 chunks' },
   { key: 'recall@10', label: 'recall@10', help: 'share of answer files found in the top 10 chunks' },
@@ -177,7 +178,7 @@ function retrieverChart(): HTMLElement {
   const findings = el('ul', 'findings');
   for (const f of [
     'Embeddings alone won. Adding BM25 keyword search with reciprocal rank fusion, the textbook upgrade, made ranking slightly worse.',
-    'A cross-encoder reranker (ms-marco-MiniLM, trained on web search) hurt the most: recall@1 fell from 0.64 to 0.44.',
+    'A reranker trained on web search (ms-marco-MiniLM), reordering the same top 20, hurt the most: the right file came first for 53% of questions instead of 72%, and it pushed tests to the top twice as often (13 questions vs 6). A code-trained reranker was not tested.',
     'Keeping all 768 dimensions beat the 256-dim Matryoshka prefix, for about 1 MB more per repo.',
   ])
     findings.append(el('li', '', f));
