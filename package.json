@@ -12,12 +12,14 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build:examples": "rolldown scripts/build-examples.ts --format esm --platform node --external @huggingface/transformers --file scripts/.build-examples.mjs && node scripts/.build-examples.mjs",
-    "eval": "rolldown scripts/eval.ts --format esm --platform node --external @huggingface/transformers --file scripts/.eval.mjs && node scripts/.eval.mjs"
+    "eval": "rolldown scripts/eval.ts --format esm --platform node --external @huggingface/transformers --file scripts/.eval.mjs && node scripts/.eval.mjs",
+    "eval:answers": "rolldown scripts/eval-answers.ts --format esm --platform node --external @huggingface/transformers --file scripts/.eval-answers.mjs && node scripts/.eval-answers.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "4.3.1",
     "dompurify": "3.4.17",
-    "marked": "18.1.1"
+    "marked": "18.1.1",
+    "umap-js": "1.4.0"
   },
   "devDependencies": {
     "typescript": "7.0.2",

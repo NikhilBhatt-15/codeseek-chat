@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "codeseek chat: Ask this repo",
+  "version": "1.0.0",
+  "description": "Adds an \"Ask this repo\" button to GitHub repositories. Opens codeseek chat, which answers questions about the code in your browser.",
+  "homepage_url": "https://codeseek-chat.netlify.app/",
+  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" },
+  "content_scripts": [
+    {
+      "matches": ["https://github.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

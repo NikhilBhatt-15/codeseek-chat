@@ -1,5 +1,7 @@
 import { runAgent, needsAgent, type AgentStep } from './agent';
 import { Embedder } from './embedder';
+import { LOCAL_LLM_LABEL, LOCAL_LLM_MB } from './llmProtocol';
+import { LocalLlm } from './localLlm';
 import { EXAMPLES, findExample, loadExample, normaliseQuestion, type Example, type LoadedExample } from './examples';
 import { DEFAULT_MODEL, GeminiError, streamChat, SUGGESTED_MODELS, type Turn } from './gemini';
 import { blobUrl, fetchContents, fetchSnapshot, GitHubError, LIMITS, parseRepo, type IndexSize, type RepoSnapshot } from './github';
@@ -21,6 +23,7 @@ import {
   type RepoIndex,
 } from './repoIndex';
 import { EMBED_DIM } from './protocol';
+import { go, interceptLinks, showView, viewOf, type View } from './router';
 import { fileMatches, shareUrl } from './share';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -44,6 +47,10 @@ const KEY_STORAGE = 'codeseek-chat:gemini-key';
 const GH_TOKEN_STORAGE = 'codeseek-chat:github-token';
 const MODEL_STORAGE = 'codeseek-chat:model';
 const AGENT_STORAGE = 'codeseek-chat:agent';
+const ENGINE_STORAGE = 'codeseek-chat:engine';
+/** Who writes answers: Gemini with the visitor's key, a small LLM in the browser, or nobody. */
+type Engine = 'cloud' | 'local' | 'off';
+const engineOf = (e: string | null): Engine => (e === 'local' || e === 'off' ? e : 'cloud');
 type AgentMode = 'auto' | 'always' | 'off';
 const agentMode = (m: string | null): AgentMode => (m === 'always' || m === 'off' ? m : 'auto');
 const store = {
@@ -77,7 +84,31 @@ const settings = {
   githubToken: store.get(GH_TOKEN_STORAGE) ?? '',
   model: store.get(MODEL_STORAGE) ?? DEFAULT_MODEL,
   agent: agentMode(store.get(AGENT_STORAGE)),
+  engine: engineOf(store.get(ENGINE_STORAGE)),
 };
+
+/** What actually happens for the next question. */
+const answerMode = (): 'cloud' | 'local' | 'search' =>
+  settings.engine === 'local' ? 'local' : settings.engine === 'cloud' && settings.apiKey ? 'cloud' : 'search';
+
+// ---- offline LLM (created on first use) ----
+
+let localLlm: LocalLlm | null = null;
+const llmProgress = { loaded: 0, total: 0 };
+function getLocalLlm(): LocalLlm {
+  if (!localLlm) {
+    localLlm = new LocalLlm();
+    localLlm.onProgress = (loaded, total) => Object.assign(llmProgress, { loaded, total });
+  }
+  return localLlm;
+}
+
+function useOffline(): void {
+  settings.engine = 'local';
+  store.set(ENGINE_STORAGE, 'local', true);
+  updateModeNote();
+  void getLocalLlm().load().catch(() => {});
+}
 
 // ---- device ----
 
@@ -184,25 +215,42 @@ const modelLabel = (m: string) =>
   m.replace(/^gemini-/, '').replace(/-latest$/, '').split('-').map((w) => w[0]!.toUpperCase() + w.slice(1)).join(' ');
 
 function updateModeNote(): void {
+  const mode = answerMode();
   const badge = $('mode-badge');
-  badge.classList.toggle('on', Boolean(settings.apiKey));
-  badge.textContent = settings.apiKey ? `AI answers on · ${modelLabel(settings.model)}` : 'Search only · turn on AI answers';
-  badge.title = settings.apiKey ? 'Change the Gemini key or model' : 'Add a free Gemini key to get written answers';
-  $('mode-note').textContent = settings.apiKey
-    ? 'Your question and the matching code are sent to Gemini.'
-    : 'You get the matching code. Answers need a free Gemini key.';
+  badge.classList.toggle('on', mode !== 'search');
+  badge.textContent =
+    mode === 'cloud'
+      ? `AI answers on · ${modelLabel(settings.model)}`
+      : mode === 'local'
+        ? `Offline AI · ${LOCAL_LLM_LABEL}`
+        : 'Search only · turn on AI answers';
+  badge.title = mode === 'search' ? 'Add a free Gemini key, or use the offline AI' : 'Change how answers are written';
+  $('mode-note').textContent =
+    mode === 'cloud'
+      ? 'Your question and the matching code are sent to Gemini.'
+      : mode === 'local'
+        ? 'Answers are written on your device. Nothing leaves your browser.'
+        : 'You get the matching code. Answers need a free Gemini key or the offline AI.';
 }
 
+const repoParams = (repo: string, question?: string | null) => {
+  const params = new URLSearchParams({ repo });
+  if (question) params.set('q', question);
+  return params;
+};
+
+/** Keeps the address bar on /repo?repo=…&q=… (shareable) without adding history entries. */
 function setUrl(repo: string | null, question: string | null): void {
   try {
-    const url = new URL(location.href);
-    url.search = '';
-    if (repo) url.searchParams.set('repo', repo);
-    if (repo && question) url.searchParams.set('q', question);
-    window.history.replaceState(null, '', url);
+    if (repo) go('repo', repoParams(repo, question), true);
   } catch {
     // ignore
   }
+}
+
+/** Opens the workspace view for a repo: a new history entry from home, a replacement inside it. */
+function enterWorkspace(repo: string, question?: string | null): void {
+  go('repo', repoParams(repo, question), viewOf(new URL(location.href)) === 'repo');
 }
 
 // ---- landing ----
@@ -315,6 +363,7 @@ async function indexRepo(input: string, opts: IndexOptions = {}): Promise<boolea
   const { signal } = controller;
 
   $<HTMLButtonElement>('index-btn').disabled = true;
+  if (!opts.extend) enterWorkspace(`${ref.owner}/${ref.repo}`, new URL(location.href).searchParams.get('q'));
   $('progress').hidden = false;
   $('chat').hidden = true;
   $('estimate').hidden = true;
@@ -399,6 +448,8 @@ async function indexRepo(input: string, opts: IndexOptions = {}): Promise<boolea
         openChat(opts.extend, ''); // back to the index we had
         return true;
       }
+      if (index) $('chat').hidden = false;
+      else go('home', '', true);
       return false;
     }
     if (err instanceof GitHubError && err.rateLimited) {
@@ -410,6 +461,8 @@ async function indexRepo(input: string, opts: IndexOptions = {}): Promise<boolea
       }
     }
     $('progress').hidden = true;
+    if (index && opts.extend) $('chat').hidden = false;
+    else go('home', '', true);
     showError(err instanceof Error ? err.message : String(err));
     return false;
   } finally {
@@ -423,6 +476,7 @@ async function openExample(ex: Example, question?: string): Promise<void> {
   showError(null);
   indexing?.abort();
   $<HTMLInputElement>('repo-input').value = ex.repo;
+  enterWorkspace(ex.repo, question);
   let loaded: LoadedExample;
   try {
     loaded = await loadExample(ex);
@@ -460,10 +514,9 @@ function openChat(built: RepoIndex, note: string, fromExample: LoadedExample | n
   lastQuestion = undefined;
   $('progress').hidden = true;
   $('chat').hidden = false;
-  $('intro').hidden = true;
-  $('examples').hidden = true;
-  $('device-note').hidden = true;
   $('messages').replaceChildren();
+  showTab('ask');
+  mapState = null;
   const repoLink = link(`https://github.com/${built.owner}/${built.repo}/tree/${built.commit}`, `${built.owner}/${built.repo}`);
   $('repo-label').replaceChildren(repoLink, ` @ ${built.branch ?? built.commit.slice(0, 7)}${built.branch ? ` (${built.commit.slice(0, 7)})` : ''}`);
   $('repo-stats').textContent = [`${plural(built.paths.length, 'file')}, ${plural(built.chunks.length, 'chunk')}`, note, coverageNote(built)]
@@ -602,6 +655,17 @@ function keyCta(): HTMLElement {
   paste.type = 'button';
   paste.onclick = openSettings;
   box.append(get, paste);
+  if (!isMobile) {
+    const offline = el('button', 'ghost small', `Or use offline AI (${LOCAL_LLM_MB} MB, no key)`);
+    offline.type = 'button';
+    offline.title = `Downloads ${LOCAL_LLM_LABEL} once and writes answers on your device`;
+    offline.onclick = () => {
+      useOffline();
+      offline.textContent = 'Offline AI on. Ask again to get an answer.';
+      offline.disabled = true;
+    };
+    box.append(offline);
+  }
   return box;
 }
 
@@ -609,7 +673,7 @@ function shareButton(current: RepoIndex, question: string): HTMLButtonElement {
   const btn = el('button', 'ghost small share', 'Copy link to this answer');
   btn.type = 'button';
   btn.onclick = async () => {
-    const url = shareUrl(location.href, `${current.owner}/${current.repo}`, question);
+    const url = shareUrl(`${location.origin}${import.meta.env.BASE_URL}`, `${current.owner}/${current.repo}`, question);
     try {
       await navigator.clipboard.writeText(url);
       btn.textContent = 'Link copied ✓';
@@ -653,9 +717,16 @@ async function ask(question: string): Promise<void> {
     const h = hits[n - 1];
     return h ? blobUrl(current, h.path, h.startLine, h.endLine) : null;
   };
-  const footer = () => {
+  const footer = (shown: Hit[]) => {
     const row = el('div', 'msg-actions');
-    row.append(shareButton(current, question));
+    const onMap = el('button', 'ghost small', 'Show on map');
+    onMap.type = 'button';
+    onMap.title = 'See where these matches sit in the map of the code';
+    onMap.onclick = () => {
+      lastHits = shown;
+      showTab('map');
+    };
+    row.append(shareButton(current, question), onMap);
     return row;
   };
 
@@ -664,12 +735,13 @@ async function ask(question: string): Promise<void> {
     const saved = savedAnswer(question);
     if (saved) {
       lastQuestion = question;
+      lastHits = saved.hits;
       answer.innerHTML = renderMarkdown(linkCitations(saved.answer, urlFor(saved.hits)));
       bot.append(
         el('p', 'muted small saved', 'Saved example answer. The excerpts were retrieved by EmbeddingGemma 2 from this index.'),
         renderHowFound(current, saved.hits, 'at build time', 'saved'),
         renderSources(current, saved.hits, false),
-        footer(),
+        footer(saved.hits),
       );
       asked.scrollIntoView({ block: 'start', behavior: 'smooth' });
       history = [...history, { role: 'user' as const, text: question }, { role: 'model' as const, text: saved.answer }].slice(-6);
@@ -703,9 +775,11 @@ async function ask(question: string): Promise<void> {
     const t0 = performance.now();
     const hits = retrieve(current, query);
     const searchMs = performance.now() - t0;
+    lastHits = hits;
     lastQuestion = question;
 
-    if (settings.apiKey && (settings.agent === 'always' || (settings.agent === 'auto' && needsAgent(question)))) {
+    const mode = answerMode();
+    if (mode === 'cloud' && (settings.agent === 'always' || (settings.agent === 'auto' && needsAgent(question)))) {
       const trace = el('ol', 'agent-steps');
       bot.insertBefore(trace, answer);
       const onStep = (s: AgentStep) =>
@@ -721,21 +795,62 @@ async function ask(question: string): Promise<void> {
         search: async (q, k) => retrieve(current, await getEmbedder().embedQuery(q), k),
       });
       const sources = result.sources.map((h) => ({ ...h, score: similarity(current, h.index, query) }));
+      lastHits = sources;
       answer.innerHTML = renderMarkdown(linkCitations(result.answer, urlFor(sources)));
       bot.append(
         renderHowFound(current, sources, `in ${plural(result.steps.length, 'step')}`, 'agent'),
         renderSources(current, sources, false),
-        footer(),
+        footer(sources),
       );
       history = [...history, { role: 'user' as const, text: question }, { role: 'model' as const, text: result.answer }].slice(-6);
       return;
     }
 
-    if (!settings.apiKey) {
+    if (mode === 'local') {
+      const llm = getLocalLlm();
+      if (!llm.loaded) {
+        const paint = () =>
+          (answer.textContent = `Loading the offline AI, ${LOCAL_LLM_LABEL} (${llmProgress.total ? `${mb(llmProgress.loaded)} / ${mb(llmProgress.total)}` : 'starting'}). Downloaded once, then cached.`);
+        paint();
+        status = setInterval(paint, 250);
+        await llm.load();
+        clearInterval(status);
+        answer.textContent = '';
+      }
+      let text = '';
+      let frame = 0;
+      const paint = () => {
+        frame = 0;
+        answer.innerHTML = renderMarkdown(linkCitations(text, urlFor(hits)));
+      };
+      const tokensPerSecond = await llm.generate(
+        [
+          { role: 'system', content: systemPrompt(`${current.owner}/${current.repo}`) },
+          { role: 'user', content: userPrompt(question, hits) },
+        ],
+        (t) => {
+          text += t;
+          frame ||= requestAnimationFrame(paint);
+        },
+        controller.signal,
+      );
+      cancelAnimationFrame(frame);
+      paint();
+      const where = llm.device === 'webgpu' ? 'your GPU' : 'your CPU';
+      bot.append(
+        el('p', 'muted small saved', `Written offline by ${LOCAL_LLM_LABEL} on ${where} at ${tokensPerSecond.toFixed(0)} tokens/s. Small models can be wrong; check the sources.`),
+        renderHowFound(current, hits, howTiming(searchMs)),
+        renderSources(current, hits, false),
+        footer(hits),
+      );
+      return;
+    }
+
+    if (mode === 'search') {
       answer.innerHTML = renderMarkdown(hits.length ? 'Here’s the code that best matches your question:' : 'No matching code found.');
       const results = el('div', 'results');
       hits.slice(0, 5).forEach((h, i) => results.append(hitCard(current, h, i + 1)));
-      bot.append(results, keyCta(), renderHowFound(current, hits, howTiming(searchMs)), footer());
+      bot.append(results, keyCta(), renderHowFound(current, hits, howTiming(searchMs)), footer(hits));
       return;
     }
 
@@ -759,7 +874,7 @@ async function ask(question: string): Promise<void> {
     });
     cancelAnimationFrame(frame);
     paint();
-    bot.append(renderHowFound(current, hits, howTiming(searchMs)), renderSources(current, hits, false), footer());
+    bot.append(renderHowFound(current, hits, howTiming(searchMs)), renderSources(current, hits, false), footer(hits));
     // Keep a short plain-text history (without the bulky excerpts) for follow-ups.
     history = [...history, { role: 'user' as const, text: question }, { role: 'model' as const, text }].slice(-6);
   } catch (err) {
@@ -814,6 +929,7 @@ function openSettings(): void {
   $<HTMLInputElement>('gh-input').value = settings.githubToken;
   $<HTMLInputElement>('model-input').value = settings.model;
   $<HTMLSelectElement>('agent-input').value = settings.agent;
+  $<HTMLSelectElement>('engine-input').value = settings.engine;
   $<HTMLInputElement>('remember-input').checked = store.persisted(KEY_STORAGE) || store.persisted(GH_TOKEN_STORAGE);
   dialog.showModal();
 }
@@ -830,18 +946,81 @@ dialog.addEventListener('close', () => {
   store.set(MODEL_STORAGE, settings.model === DEFAULT_MODEL ? null : settings.model, true);
   settings.agent = agentMode($<HTMLSelectElement>('agent-input').value);
   store.set(AGENT_STORAGE, settings.agent === 'auto' ? null : settings.agent, true);
+  settings.engine = engineOf($<HTMLSelectElement>('engine-input').value);
+  store.set(ENGINE_STORAGE, settings.engine === 'cloud' ? null : settings.engine, true);
+  if (settings.engine === 'local') void getLocalLlm().load().catch(() => {});
   updateModeNote();
 });
 
-// ---- start: ?repo=owner/repo&q=question ----
+// ---- workspace tabs: Ask | Map ----
 
-renderExamples();
-updateModeNote();
-{
-  const params = new URL(location.href).searchParams;
-  const repo = params.get('repo');
-  const question = params.get('q')?.trim() || undefined;
-  if (repo && parseRepo(repo)) {
+type Tab = 'ask' | 'map';
+let mapState: { index: RepoIndex; render: (highlight?: Hit[]) => void } | null = null;
+let lastHits: Hit[] = [];
+
+function showTab(tab: Tab): void {
+  for (const t of ['ask', 'map'] as const) {
+    $(`tab-${t}`).setAttribute('aria-selected', String(t === tab));
+    $(`${t}-panel`).hidden = t !== tab;
+  }
+  if (tab === 'map') void openMap();
+}
+
+async function openMap(): Promise<void> {
+  if (!index) return;
+  const panel = $('map-panel');
+  if (mapState?.index === index) {
+    mapState.render(lastHits);
+    return;
+  }
+  const current = index;
+  panel.replaceChildren(el('p', 'muted', 'Laying out the code…'));
+  const { renderMap } = await import('./map');
+  if (index !== current) return;
+  mapState = {
+    index: current,
+    render: renderMap(panel, current, {
+      apiKey: () => settings.apiKey,
+      model: () => settings.model,
+      blobUrl: (path, start, end) => blobUrl(current, path, start, end),
+      onAsk: (q) => {
+        showTab('ask');
+        void ask(q);
+      },
+    }),
+  };
+  mapState.render(lastHits);
+}
+
+$('tab-ask').addEventListener('click', () => showTab('ask'));
+$('tab-map').addEventListener('click', () => showTab('map'));
+
+// ---- views and start: /, /repo?repo=owner/name&q=question, /benchmark ----
+
+let benchmarkShown = false;
+async function showBenchmark(): Promise<void> {
+  if (benchmarkShown) return;
+  benchmarkShown = true;
+  const { renderBenchmark } = await import('./benchmark');
+  renderBenchmark($('benchmark'));
+}
+
+/** Shows whatever the current URL points at, opening the repo if it isn't open yet. */
+function route(): void {
+  const url = new URL(location.href);
+  const view: View = viewOf(url);
+  showError(null);
+  if (view === 'benchmark') {
+    showView('benchmark');
+    void showBenchmark();
+    return;
+  }
+  const repo = url.searchParams.get('repo');
+  if (view === 'repo' && repo && parseRepo(repo)) {
+    showView('repo');
+    const question = url.searchParams.get('q')?.trim() || undefined;
+    const open = index && `${index.owner}/${index.repo}`.toLowerCase() === repo.toLowerCase();
+    if (open || indexing) return;
     $<HTMLInputElement>('repo-input').value = repo;
     const ex = findExample(repo);
     if (ex) void openExample(ex, question);
@@ -849,5 +1028,33 @@ updateModeNote();
       void indexRepo(repo, { confirm: true }).then((opened) => {
         if (opened && question) void ask(question);
       });
+    return;
   }
+  if (view === 'repo') go('home', '', true);
+  showView('home');
 }
+
+// The bookmarklet: opens the current GitHub repo here. Built from this site's own address.
+{
+  const site = `${location.origin}${import.meta.env.BASE_URL}repo?repo=`;
+  // No regex or backslashes: they don't survive being a URL reliably.
+  const code = `(()=>{const p=location.pathname.split('/');if(location.hostname!=='github.com'||!p[1]||!p[2]){alert('Open a GitHub repository page first.');return}window.open(${JSON.stringify(site)}+encodeURIComponent(p[1]+'/'+p[2]),'_blank','noopener')})()`;
+  const bm = $<HTMLAnchorElement>('bookmarklet');
+  bm.href = `javascript:${code}`;
+  bm.addEventListener('click', (e) => {
+    e.preventDefault();
+    showError(null);
+    bm.textContent = 'Drag me to your bookmarks bar ↑';
+    setTimeout(() => (bm.textContent = 'Ask this repo'), 2500);
+  });
+}
+
+renderExamples();
+updateModeNote();
+interceptLinks((view) => {
+  if (view === 'repo' && index) go('repo', repoParams(`${index.owner}/${index.repo}`));
+  else go(view, '');
+  if (view === 'benchmark') void showBenchmark();
+});
+window.addEventListener('popstate', route);
+route();

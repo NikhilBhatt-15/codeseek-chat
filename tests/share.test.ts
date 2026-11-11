@@ -3,9 +3,10 @@ import { normaliseQuestion } from '../src/examples';
 import { fileMatches, shareUrl } from '../src/share';
 
 describe('share links', () => {
-  it('builds ?repo=&q= links on the current page, dropping old params', () => {
-    const url = shareUrl('https://x.github.io/codeseek-chat/?repo=a/b&q=old#top', 'sindresorhus/ky', 'Where do retries happen?');
-    expect(url).toBe('https://x.github.io/codeseek-chat/?repo=sindresorhus%2Fky&q=Where+do+retries+happen%3F');
+  it('builds /repo?repo=&q= links under the site base', () => {
+    const url = shareUrl('https://x.netlify.app/', 'sindresorhus/ky', 'Where do retries happen?');
+    expect(url).toBe('https://x.netlify.app/repo?repo=sindresorhus%2Fky&q=Where+do+retries+happen%3F');
+    expect(shareUrl('https://x.github.io/codeseek-chat', 'a/b')).toBe('https://x.github.io/codeseek-chat/repo?repo=a%2Fb');
     const back = new URL(url).searchParams;
     expect(back.get('repo')).toBe('sindresorhus/ky');
     expect(back.get('q')).toBe('Where do retries happen?');

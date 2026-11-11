@@ -1,11 +1,9 @@
 // Small pure helpers for shareable links and the "how it found this" view.
 import type { Hit } from './repoIndex';
 
-/** A link that reopens `repo` and asks `question`: ?repo=owner/repo&q=question. */
-export function shareUrl(current: string, repo: string, question?: string): string {
-  const url = new URL(current);
-  url.search = '';
-  url.hash = '';
+/** A link that reopens `repo` and asks `question`: <base>repo?repo=owner/name&q=question. */
+export function shareUrl(base: string, repo: string, question?: string): string {
+  const url = new URL('repo', base.endsWith('/') ? base : `${base}/`);
   url.searchParams.set('repo', repo);
   if (question) url.searchParams.set('q', question);
   return url.toString();

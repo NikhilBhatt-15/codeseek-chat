@@ -5,3 +5,4 @@ scripts/.build-examples.mjs
 .claude/
 scripts/.eval.mjs
 eval/.cache/
+scripts/.eval-answers.mjs

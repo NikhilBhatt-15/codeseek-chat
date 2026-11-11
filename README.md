@@ -9,21 +9,37 @@ The repository's code is embedded **in your browser** with Google DeepMind's
 [Transformers.js](https://github.com/huggingface/transformers.js) on WebGPU (or WebAssembly
 as a fallback). Your question retrieves the most relevant code. With a free Gemini API key,
 Gemini writes an answer that cites `file:line` links into GitHub. Without a key you still get
-semantic search.
+semantic search, or you can switch on **offline AI**: a small LLM that writes answers in your
+browser with no key, so nothing leaves your device.
 
 Retrieval is measured, not assumed: a 64-question benchmark over four repos compares embeddings,
-BM25, hybrid fusion, a reranker, vector sizes and model precisions. [Results below](#retrieval-evaluation).
+BM25, hybrid fusion, a reranker, vector sizes and model precisions. [Results below](#retrieval-evaluation),
+and on the site's [benchmark page](https://codeseek-chat.netlify.app/benchmark).
 
 It's the browser companion to [codeseek](https://github.com/NikhilBhatt-15/codeseek), the
 command-line tool, and uses the same chunking rules.
 
 ## Features
 
+- **Three pages.** Home (examples and how it works), a repo workspace at
+  `/repo?repo=owner/name` with **Ask** and **Map** tabs, and the
+  [benchmark](https://codeseek-chat.netlify.app/benchmark) with charts of the eval results. It's one
+  page app with real URLs, so the models stay loaded as you move around.
+- **Map of the code.** Every chunk is a dot, laid out with UMAP so that code doing similar things
+  sits together, and colored by topic (k-means on the embeddings). Topics are named by Gemini when
+  a key is set, or by each cluster's most distinctive identifiers when not. The matches for your
+  latest question are ringed, so you can see retrieval happen. Click a dot to read the code.
+- **Offline AI.** Choose *Offline AI* in Settings, or click the button under a search result, and
+  [Qwen3.5 0.8B](https://huggingface.co/onnx-community/Qwen3.5-0.8B-Text-ONNX) (469 MB, 4-bit,
+  downloaded once) writes the answer on your GPU with the same `[1]` citations. No key, no server.
+- **Ask from GitHub.** A bookmarklet on the home page, or a small Chrome extension (in
+  [Releases](https://github.com/NikhilBhatt-15/codeseek-chat/releases)) that adds an
+  **Ask this repo** button to every GitHub repo page. The extension asks for no permissions.
 - **Instant examples.** Three example repos ship with pre-built indexes, each with example
   questions that answer the moment you click. The model downloads in the background while you read.
-- **Shareable links.** `?repo=owner/repo&q=question` opens a repo and asks the question.
+- **Shareable links.** `/repo?repo=owner/repo&q=question` opens a repo and asks the question.
   Every answer has a **Copy link to this answer** button. For example:
-  [where does ky decide to retry a request?](https://codeseek-chat.netlify.app/?repo=sindresorhus/ky&q=Where%20does%20ky%20decide%20whether%20to%20retry%20a%20failed%20request%3F)
+  [where does ky decide to retry a request?](https://codeseek-chat.netlify.app/repo?repo=sindresorhus/ky&q=Where%20does%20ky%20decide%20whether%20to%20retry%20a%20failed%20request%3F)
 - **How it found this.** Each answer shows the best-matching files with their similarity scores.
 - **Multi-step search.** With a key, Gemini drives three tools over the in-browser index:
   `search_code`, `find_references` (exact, whole-word) and `read_lines`. For questions like "where
@@ -163,7 +179,11 @@ npm test           # unit tests (chunking, GitHub, retrieval, prompts, SSE parsi
 npm run build      # type-check and production build into dist/
 npm run build:examples   # re-embed the example repos into public/examples/ (CPU, a few minutes)
 npm run eval             # retrieval benchmark (see above)
+npm run eval:answers     # answer quality: offline model vs Gemini (set GEMINI_API_KEY for Gemini + judge)
 ```
+
+The Chrome extension lives in `extension/`. To try it, open `chrome://extensions`, turn on
+Developer mode and *Load unpacked* that folder.
 
 The example indexes are made with the same model, chunking and document format as the browser,
 running on the CPU through onnxruntime-node. Their questions and saved answers live in

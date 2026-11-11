@@ -10,88 +10,118 @@
   </head>
   <body>
     <header class="top">
-      <a class="brand" href="./">
+      <a class="brand" href="/" data-route="home">
         <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="13" cy="13" r="8" /><path d="M19 19l8 8" /></svg>
         codeseek <span>chat</span>
       </a>
       <nav>
+        <a href="/benchmark" data-route="benchmark">Benchmark</a>
         <a href="https://github.com/NikhilBhatt-15/codeseek-chat" target="_blank" rel="noopener">Source</a>
         <button id="settings-btn" class="ghost" type="button">Settings</button>
       </nav>
     </header>
 
     <main>
-      <section id="intro" class="intro">
-        <h1>Ask any GitHub repo a question.</h1>
-        <p>
-          Paste a repo, ask in plain English, and get an answer that links to the exact lines of code.
-          It all runs in your browser: no sign-up and no server.
-        </p>
-      </section>
+      <div data-view="home">
+        <section id="intro" class="intro">
+          <h1>Ask any GitHub repo a question.</h1>
+          <p>
+            Paste a repo, ask in plain English, and get an answer that links to the exact lines of code.
+            It all runs in your browser: no sign-up and no server.
+          </p>
+        </section>
 
-      <form id="repo-form" class="repo-form" autocomplete="off">
-        <input id="repo-input" name="repo" placeholder="owner/repo or https://github.com/owner/repo" aria-label="GitHub repository" required />
-        <select id="size-select" aria-label="How much of the repo to index" title="How much of the repo to index">
-          <option value="quick" selected>Quick · up to 400 KB</option>
-          <option value="full">Full · up to 2.5 MB</option>
-        </select>
-        <button id="index-btn" type="submit">Index repo</button>
-      </form>
-      <p id="device-note" class="device-note" hidden></p>
-      <section id="examples" class="examples" aria-label="Examples with instant answers"></section>
-
-      <section id="how" class="how-it-works" aria-label="How it works">
-        <h2>How it works</h2>
-        <ol>
-          <li>
-            <strong>Reads the repo</strong>
-            <span>Downloads the code from GitHub and splits it into small pieces at functions and classes.</span>
-          </li>
-          <li>
-            <strong>Finds the right code</strong>
-            <span>An AI model running on your device
-              (<a href="https://huggingface.co/google/embeddinggemma-2" target="_blank" rel="noopener">EmbeddingGemma&nbsp;2</a>)
-              matches your question to the code by meaning, not just keywords.</span>
-          </li>
-          <li>
-            <strong>Explains it</strong>
-            <span>Gemini writes an answer that cites the exact lines. This step needs a free Gemini key;
-              without one you get the matching code.</span>
-          </li>
-        </ol>
-      </section>
-
-      <section id="progress" class="progress" hidden>
-        <div class="progress-head">
-          <strong id="progress-title">Indexing…</strong>
-          <button id="cancel-btn" class="ghost small" type="button">Cancel</button>
-        </div>
-        <p id="estimate" class="estimate" hidden></p>
-        <div id="confirm" class="confirm" hidden>
-          <button id="start-btn" type="button">Start indexing</button>
-        </div>
-        <ol id="steps" class="steps"></ol>
-        <div class="bar"><div id="bar-fill"></div></div>
-        <p id="progress-note" class="muted"></p>
-      </section>
-
-      <section id="chat" class="chat" hidden>
-        <div class="repo-banner">
-          <span id="repo-label"></span>
-          <span id="repo-stats" class="muted"></span>
-          <button id="more-btn" class="ghost small" type="button" hidden></button>
-        </div>
-        <div id="messages" class="messages" aria-live="polite"></div>
-        <p id="model-status" class="model-status muted small" hidden></p>
-        <div class="ask-bar">
-          <button id="mode-badge" class="mode-badge" type="button"></button>
-          <span id="mode-note" class="muted small"></span>
-        </div>
-        <form id="ask-form" class="ask-form">
-          <textarea id="ask-input" rows="1" placeholder="Ask about the code, e.g. “where are errors handled?”" aria-label="Question"></textarea>
-          <button id="ask-btn" type="submit">Ask</button>
+        <form id="repo-form" class="repo-form" autocomplete="off">
+          <input id="repo-input" name="repo" placeholder="owner/repo or https://github.com/owner/repo" aria-label="GitHub repository" required />
+          <select id="size-select" aria-label="How much of the repo to index" title="How much of the repo to index">
+            <option value="quick" selected>Quick · up to 400 KB</option>
+            <option value="full">Full · up to 2.5 MB</option>
+          </select>
+          <button id="index-btn" type="submit">Index repo</button>
         </form>
-      </section>
+        <p id="device-note" class="device-note" hidden></p>
+        <section id="examples" class="examples" aria-label="Examples with instant answers"></section>
+
+        <section id="how" class="how-it-works" aria-label="How it works">
+          <h2>How it works</h2>
+          <ol>
+            <li>
+              <strong>Reads the repo</strong>
+              <span>Downloads the code from GitHub and splits it into small pieces at functions and classes.</span>
+            </li>
+            <li>
+              <strong>Finds the right code</strong>
+              <span>An AI model running on your device
+                (<a href="https://huggingface.co/google/embeddinggemma-2" target="_blank" rel="noopener">EmbeddingGemma&nbsp;2</a>)
+                matches your question to the code by meaning, not just keywords.</span>
+            </li>
+            <li>
+              <strong>Explains it</strong>
+              <span>Gemini writes an answer that cites the exact lines. This step needs a free Gemini key;
+                without one you get the matching code.</span>
+            </li>
+          </ol>
+        </section>
+
+        <section class="from-github" aria-label="Ask from GitHub">
+          <h2>Ask from any GitHub page</h2>
+          <p>
+            Drag this button to your bookmarks bar, then click it on any GitHub repo:
+            <a id="bookmarklet" class="bookmarklet" href="#" title="Drag me to your bookmarks bar">Ask this repo</a>
+          </p>
+          <p class="muted small">
+            Or install the Chrome extension, which adds an “Ask this repo” button to every repo page:
+            <a href="https://github.com/NikhilBhatt-15/codeseek-chat/releases/latest" target="_blank" rel="noopener">download it</a>,
+            unzip, open <code>chrome://extensions</code>, turn on Developer mode and click <em>Load unpacked</em>.
+            It asks for no permissions.
+          </p>
+        </section>
+
+      </div>
+
+      <div data-view="repo" hidden>
+        <a class="back" href="/" data-route="home">← Home</a>
+        <section id="progress" class="progress" hidden>
+          <div class="progress-head">
+            <strong id="progress-title">Indexing…</strong>
+            <button id="cancel-btn" class="ghost small" type="button">Cancel</button>
+          </div>
+          <p id="estimate" class="estimate" hidden></p>
+          <div id="confirm" class="confirm" hidden>
+            <button id="start-btn" type="button">Start indexing</button>
+          </div>
+          <ol id="steps" class="steps"></ol>
+          <div class="bar"><div id="bar-fill"></div></div>
+          <p id="progress-note" class="muted"></p>
+        </section>
+
+        <section id="chat" class="chat" hidden>
+          <div class="repo-banner">
+            <span id="repo-label"></span>
+            <span id="repo-stats" class="muted"></span>
+            <button id="more-btn" class="ghost small" type="button" hidden></button>
+          </div>
+          <div class="tabs" role="tablist" aria-label="Workspace">
+            <button id="tab-ask" class="tab" role="tab" type="button" aria-selected="true" aria-controls="ask-panel">Ask</button>
+            <button id="tab-map" class="tab" role="tab" type="button" aria-selected="false" aria-controls="map-panel">Map of the code</button>
+          </div>
+          <div id="ask-panel" role="tabpanel" aria-labelledby="tab-ask">
+          <div id="messages" class="messages" aria-live="polite"></div>
+          <p id="model-status" class="model-status muted small" hidden></p>
+          <div class="ask-bar">
+            <button id="mode-badge" class="mode-badge" type="button"></button>
+            <span id="mode-note" class="muted small"></span>
+          </div>
+          <form id="ask-form" class="ask-form">
+            <textarea id="ask-input" rows="1" placeholder="Ask about the code, e.g. “where are errors handled?”" aria-label="Question"></textarea>
+            <button id="ask-btn" type="submit">Ask</button>
+          </form>
+          </div>
+          <div id="map-panel" class="map-panel" role="tabpanel" aria-labelledby="tab-map" hidden></div>
+        </section>
+      </div>
+
+      <section id="benchmark" class="benchmark" data-view="benchmark" hidden aria-label="Retrieval benchmark"></section>
 
       <p id="error" class="error" role="alert" hidden></p>
     </main>
@@ -99,6 +129,18 @@
     <dialog id="settings">
       <form method="dialog" class="settings-form">
         <h2>Settings</h2>
+        <label>
+          Answers written by
+          <select id="engine-input">
+            <option value="cloud">Gemini, with your free API key</option>
+            <option value="local">Offline AI in your browser (Qwen3.5 0.8B, 469 MB once)</option>
+            <option value="off">Nobody: just show the matching code</option>
+          </select>
+        </label>
+        <p class="muted small">
+          Offline AI needs no key and nothing leaves your device, but a model this small is less accurate than Gemini.
+          It runs best on a desktop browser with WebGPU.
+        </p>
         <label>
           Gemini API key
           <input id="key-input" type="password" autocomplete="off" spellcheck="false" placeholder="Paste a key to get answers" />
