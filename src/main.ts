@@ -1,3 +1,4 @@
+import { runAgent, needsAgent, type AgentStep } from './agent';
 import { Embedder } from './embedder';
 import { EXAMPLES, findExample, loadExample, normaliseQuestion, type Example, type LoadedExample } from './examples';
 import { DEFAULT_MODEL, GeminiError, streamChat, SUGGESTED_MODELS, type Turn } from './gemini';
@@ -19,6 +20,7 @@ import {
   type Hit,
   type RepoIndex,
 } from './repoIndex';
+import { EMBED_DIM } from './protocol';
 import { fileMatches, shareUrl } from './share';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -41,6 +43,9 @@ const link = (href: string, text: string, cls = '') => {
 const KEY_STORAGE = 'codeseek-chat:gemini-key';
 const GH_TOKEN_STORAGE = 'codeseek-chat:github-token';
 const MODEL_STORAGE = 'codeseek-chat:model';
+const AGENT_STORAGE = 'codeseek-chat:agent';
+type AgentMode = 'auto' | 'always' | 'off';
+const agentMode = (m: string | null): AgentMode => (m === 'always' || m === 'off' ? m : 'auto');
 const store = {
   get(key: string): string | null {
     try {
@@ -71,6 +76,7 @@ const settings = {
   apiKey: store.get(KEY_STORAGE) ?? '',
   githubToken: store.get(GH_TOKEN_STORAGE) ?? '',
   model: store.get(MODEL_STORAGE) ?? DEFAULT_MODEL,
+  agent: agentMode(store.get(AGENT_STORAGE)),
 };
 
 // ---- device ----
@@ -174,10 +180,17 @@ function setStep(active: number, note = '', fraction?: number): void {
 const mb = (bytes: number) => `${(bytes / 1e6).toFixed(0)} MB`;
 const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`;
 
+const modelLabel = (m: string) =>
+  m.replace(/^gemini-/, '').replace(/-latest$/, '').split('-').map((w) => w[0]!.toUpperCase() + w.slice(1)).join(' ');
+
 function updateModeNote(): void {
+  const badge = $('mode-badge');
+  badge.classList.toggle('on', Boolean(settings.apiKey));
+  badge.textContent = settings.apiKey ? `AI answers on · ${modelLabel(settings.model)}` : 'Search only · turn on AI answers';
+  badge.title = settings.apiKey ? 'Change the Gemini key or model' : 'Add a free Gemini key to get written answers';
   $('mode-note').textContent = settings.apiKey
-    ? `Answers by ${settings.model}. Your question and the matching excerpts are sent to Google's Gemini API.`
-    : 'Search-only mode: you get the best-matching code. Add a free Gemini API key in Settings to get written answers.';
+    ? 'Your question and the matching code are sent to Gemini.'
+    : 'You get the matching code. Answers need a free Gemini key.';
 }
 
 function setUrl(repo: string | null, question: string | null): void {
@@ -509,11 +522,48 @@ function renderSources(current: RepoIndex, hits: Hit[], open: boolean): HTMLDeta
   return details;
 }
 
+// ---- retrieval ----
+
+/**
+ * Embedding retrieval. Hybrid BM25 + rank fusion and a cross-encoder reranker were both
+ * measured on the benchmark in eval/ and did not beat embeddings alone, so exact matching is
+ * left to the agent's find_references tool, which follows identifiers across files.
+ */
+function retrieve(current: RepoIndex, vector: Float32Array, k = 8): Hit[] {
+  return dedupeHits(search(current, vector, 2 * k)).slice(0, k);
+}
+
+/** Cosine similarity of a chunk to the question (vectors are normalised). */
+function similarity(current: RepoIndex, row: number, query: Float32Array): number {
+  let s = 0;
+  for (let d = 0; d < EMBED_DIM; d++) s += current.vectors[row * EMBED_DIM + d]! * query[d]!;
+  return s;
+}
+
+const howTiming = (ms: number) => `in ${ms < 1 ? '<1' : Math.round(ms)} ms`;
+
+const HOW_NOTES = {
+  saved: 'Your question was embedded with EmbeddingGemma 2 and compared with every chunk by cosine similarity.',
+  search: 'Your question was embedded with EmbeddingGemma 2 and compared with every chunk by cosine similarity.',
+  agent: 'Gemini ran the searches listed above, following identifiers across files, and read the results before answering.',
+};
+
+/**
+ * Plain-language match strength. Cosine scores from this model cluster in a narrow band
+ * (about 0.70 to 0.85), so the label is relative to the best match for the question.
+ */
+function strength(score: number, best: number): { label: string; cls: string } {
+  const gap = best - score;
+  if (gap <= 0.01) return { label: 'best match', cls: 'best' };
+  if (gap <= 0.03) return { label: 'strong', cls: 'strong' };
+  if (gap <= 0.06) return { label: 'related', cls: 'related' };
+  return { label: 'weak', cls: 'weak' };
+}
+
 /** The retrieval at a glance: best-matching files with their similarity scores. */
-function renderHowFound(current: RepoIndex, hits: Hit[], searchMs: number | null): HTMLDetailsElement {
+function renderHowFound(current: RepoIndex, hits: Hit[], timing: string, method: keyof typeof HOW_NOTES = 'search'): HTMLDetailsElement {
   const details = el('details', 'how');
-  const timing = searchMs === null ? 'at build time' : `in ${searchMs < 1 ? '<1' : Math.round(searchMs)} ms`;
-  details.append(el('summary', '', `How it found this · ${plural(current.chunks.length, 'chunk')} compared ${timing}`));
+  details.append(el('summary', '', `How it found this · ${plural(current.chunks.length, 'chunk')} searched ${timing}`));
   const files = fileMatches(hits).slice(0, 6);
   const top = files[0]?.score ?? 1;
   // Scale between a bit below the weakest file and the best one, so close scores stay readable.
@@ -527,7 +577,10 @@ function renderHowFound(current: RepoIndex, hits: Hit[], searchMs: number | null
     const fill = el('div');
     fill.style.width = `${Math.max(6, ((f.score - floor) / Math.max(1e-6, top - floor)) * 100)}%`;
     bar.append(fill);
-    row.append(name, bar, el('span', 'how-score', `${f.score.toFixed(3)}${f.chunks > 1 ? ` ×${f.chunks}` : ''}`));
+    const s = strength(f.score, top);
+    const score = el('span', 'how-score');
+    score.append(el('span', `strength ${s.cls}`, s.label), ` ${f.score.toFixed(3)}${f.chunks > 1 ? ` ×${f.chunks}` : ''}`);
+    row.append(name, bar, score);
     list.append(row);
   }
   details.append(
@@ -535,7 +588,7 @@ function renderHowFound(current: RepoIndex, hits: Hit[], searchMs: number | null
     el(
       'p',
       'muted small',
-      'Your question was embedded with EmbeddingGemma 2 and compared with every chunk by cosine similarity. Score = best chunk in the file (×n = matching chunks). The top excerpts are cited below.',
+      `${HOW_NOTES[method]} The number is the cosine similarity of the file's best piece (×n = pieces used); the label compares it with the best match. The excerpts are cited below.`,
     ),
   );
   return details;
@@ -614,7 +667,7 @@ async function ask(question: string): Promise<void> {
       answer.innerHTML = renderMarkdown(linkCitations(saved.answer, urlFor(saved.hits)));
       bot.append(
         el('p', 'muted small saved', 'Saved example answer. The excerpts were retrieved by EmbeddingGemma 2 from this index.'),
-        renderHowFound(current, saved.hits, null),
+        renderHowFound(current, saved.hits, 'at build time', 'saved'),
         renderSources(current, saved.hits, false),
         footer(),
       );
@@ -648,15 +701,41 @@ async function ask(question: string): Promise<void> {
     answer.textContent = '';
     if (controller.signal.aborted) return;
     const t0 = performance.now();
-    const hits = dedupeHits(search(current, query, 16)).slice(0, 8);
+    const hits = retrieve(current, query);
     const searchMs = performance.now() - t0;
     lastQuestion = question;
+
+    if (settings.apiKey && (settings.agent === 'always' || (settings.agent === 'auto' && needsAgent(question)))) {
+      const trace = el('ol', 'agent-steps');
+      bot.insertBefore(trace, answer);
+      const onStep = (s: AgentStep) =>
+        trace.append(el('li', s.tool, `${s.label} · ${plural(s.results, s.tool === 'read_lines' ? 'line' : 'result')}`));
+      const result = await runAgent({
+        apiKey: settings.apiKey,
+        model: settings.model,
+        index: current,
+        question,
+        history,
+        signal: controller.signal,
+        onStep,
+        search: async (q, k) => retrieve(current, await getEmbedder().embedQuery(q), k),
+      });
+      const sources = result.sources.map((h) => ({ ...h, score: similarity(current, h.index, query) }));
+      answer.innerHTML = renderMarkdown(linkCitations(result.answer, urlFor(sources)));
+      bot.append(
+        renderHowFound(current, sources, `in ${plural(result.steps.length, 'step')}`, 'agent'),
+        renderSources(current, sources, false),
+        footer(),
+      );
+      history = [...history, { role: 'user' as const, text: question }, { role: 'model' as const, text: result.answer }].slice(-6);
+      return;
+    }
 
     if (!settings.apiKey) {
       answer.innerHTML = renderMarkdown(hits.length ? 'Here’s the code that best matches your question:' : 'No matching code found.');
       const results = el('div', 'results');
       hits.slice(0, 5).forEach((h, i) => results.append(hitCard(current, h, i + 1)));
-      bot.append(results, keyCta(), renderHowFound(current, hits, searchMs), footer());
+      bot.append(results, keyCta(), renderHowFound(current, hits, howTiming(searchMs)), footer());
       return;
     }
 
@@ -680,7 +759,7 @@ async function ask(question: string): Promise<void> {
     });
     cancelAnimationFrame(frame);
     paint();
-    bot.append(renderHowFound(current, hits, searchMs), renderSources(current, hits, false), footer());
+    bot.append(renderHowFound(current, hits, howTiming(searchMs)), renderSources(current, hits, false), footer());
     // Keep a short plain-text history (without the bulky excerpts) for follow-ups.
     history = [...history, { role: 'user' as const, text: question }, { role: 'model' as const, text }].slice(-6);
   } catch (err) {
@@ -734,10 +813,12 @@ function openSettings(): void {
   $<HTMLInputElement>('key-input').value = settings.apiKey;
   $<HTMLInputElement>('gh-input').value = settings.githubToken;
   $<HTMLInputElement>('model-input').value = settings.model;
+  $<HTMLSelectElement>('agent-input').value = settings.agent;
   $<HTMLInputElement>('remember-input').checked = store.persisted(KEY_STORAGE) || store.persisted(GH_TOKEN_STORAGE);
   dialog.showModal();
 }
 $('settings-btn').addEventListener('click', openSettings);
+$('mode-badge').addEventListener('click', openSettings);
 dialog.addEventListener('close', () => {
   if (dialog.returnValue !== 'save') return;
   const remember = $<HTMLInputElement>('remember-input').checked;
@@ -747,6 +828,8 @@ dialog.addEventListener('close', () => {
   settings.githubToken = $<HTMLInputElement>('gh-input').value.trim();
   store.set(GH_TOKEN_STORAGE, settings.githubToken || null, remember);
   store.set(MODEL_STORAGE, settings.model === DEFAULT_MODEL ? null : settings.model, true);
+  settings.agent = agentMode($<HTMLSelectElement>('agent-input').value);
+  store.set(AGENT_STORAGE, settings.agent === 'auto' ? null : settings.agent, true);
   updateModeNote();
 });
 

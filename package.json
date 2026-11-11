@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "build:examples": "rolldown scripts/build-examples.ts --format esm --platform node --external @huggingface/transformers --file scripts/.build-examples.mjs && node scripts/.build-examples.mjs"
+    "build:examples": "rolldown scripts/build-examples.ts --format esm --platform node --external @huggingface/transformers --file scripts/.build-examples.mjs && node scripts/.build-examples.mjs",
+    "eval": "rolldown scripts/eval.ts --format esm --platform node --external @huggingface/transformers --file scripts/.eval.mjs && node scripts/.eval.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "4.3.1",

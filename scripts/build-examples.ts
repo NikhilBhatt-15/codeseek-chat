@@ -5,7 +5,7 @@
 // Writes public/examples/<owner>__<repo>.json (chunks + metadata + the retrieval results for
 // each example question) and .bin (the vectors, float32). Embeddings come from the same
 // EmbeddingGemma 2 model, settings and document format as the browser worker, run on the CPU.
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AutoConfig, AutoModel, AutoTokenizer, env } from '@huggingface/transformers';
@@ -18,6 +18,7 @@ import type { ExampleFile } from '../src/examples';
 
 const root = process.env.CODESEEK_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = join(root, 'public', 'examples');
+const bench = JSON.parse(readFileSync(join(root, 'eval', 'benchmark.json'), 'utf8')) as { repos: { repo: string; commit: string }[] };
 if (process.env.HF_CACHE) env.cacheDir = process.env.HF_CACHE;
 
 const config = await AutoConfig.from_pretrained(MODEL_ID);
@@ -34,15 +35,29 @@ async function embed(texts: string[]): Promise<Float32Array> {
 
 mkdirSync(outDir, { recursive: true });
 for (const example of EXAMPLES) {
-  const ref = parseRepo(example.repo)!;
+  // Pinned to the benchmark's commit when the repo is in it, so the eval's vectors can be reused.
+  const pinned = bench.repos.find((r) => r.repo === example.repo)?.commit;
+  const ref = { ...parseRepo(example.repo)!, ...(pinned ? { ref: pinned } : {}) };
   const snap = await fetchSnapshot(ref, LIMITS.quick, fetch, process.env.GITHUB_TOKEN);
-  const contents = await fetchContents(snap, () => {});
+  // The eval (npm run eval) caches the files and their full 768-dim q4 vectors for this commit.
+  // Files download in parallel, so their order varies between fetches: reuse the eval's copy
+  // of the files too, or the cached vectors would not line up with the chunks.
+  const slug = example.repo.replace('/', '__');
+  const evalContents = join(root, 'eval', '.cache', slug, `contents-${snap.commit.slice(0, 12)}.json`);
+  const contents = existsSync(evalContents)
+    ? new Map(Object.entries(JSON.parse(readFileSync(evalContents, 'utf8')) as Record<string, string | null>))
+    : await fetchContents(snap, () => {});
   const chunks = chunkRepo(contents);
   const started = Date.now();
-  const vectors = await embedChunks(chunks, embed, (done, total) => {
-    process.stdout.write(`\r${example.repo}: ${done}/${total} chunks`);
-  });
-  console.log(` in ${((Date.now() - started) / 1000).toFixed(0)} s`);
+  const cached = join(root, 'eval', '.cache', 'embeddings', 'q4', slug);
+  const meta = existsSync(`${cached}.json`) ? (JSON.parse(readFileSync(`${cached}.json`, 'utf8')) as { chunks: number }) : null;
+  const reuse = EMBED_DIM === 768 && existsSync(evalContents) && meta?.chunks === chunks.length && existsSync(`${cached}.docs.bin`);
+  const vectors = reuse
+    ? new Float32Array(readFileSync(`${cached}.docs.bin`).buffer.slice(0))
+    : await embedChunks(chunks, embed, (done, total) => {
+        process.stdout.write(`\r${example.repo}: ${done}/${total} chunks`);
+      });
+  console.log(`${example.repo}: ${chunks.length} chunks in ${((Date.now() - started) / 1000).toFixed(0)} s${reuse ? ' (eval vectors reused)' : ''}`);
   const index = buildIndex(snap, 'quick', chunks, vectors, [...contents.keys()]);
 
   const questions = [];

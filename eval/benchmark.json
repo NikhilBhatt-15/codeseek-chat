@@ -1,0 +1,540 @@
+{
+  "repos": [
+    {
+      "repo": "sindresorhus/ky",
+      "commit": "3541888878c4d303a8bc2ad61815f4e048f55a5d"
+    },
+    {
+      "repo": "go-chi/chi",
+      "commit": "c64ed7d6635f33a8b2feaff7dcfa55677023ac7d"
+    },
+    {
+      "repo": "pallets/itsdangerous",
+      "commit": "672971d66a2ef9f85151e53283113f33d642dabd"
+    },
+    {
+      "repo": "NikhilBhatt-15/codeseek",
+      "commit": "00ea0304de016bc559c9aaf91dcd74abc3706d76"
+    }
+  ],
+  "questions": [
+    {
+      "repo": "sindresorhus/ky",
+      "question": "How is the wait before a retry computed from a Retry-After header?",
+      "files": [
+        "source/core/retry-timing.ts"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "sindresorhus/ky",
+      "question": "Which status codes and HTTP methods are retried by default?",
+      "files": [
+        "source/utils/normalize.ts"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "sindresorhus/ky",
+      "question": "How does it tell that a failed fetch was a network error rather than a bug?",
+      "files": [
+        "source/utils/is-network-error.ts"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "sindresorhus/ky",
+      "question": "What stops a response body that is bigger than the allowed maximum size?",
+      "files": [
+        "source/utils/body.ts",
+        "source/errors/ResponseSizeError.ts"
+      ],
+      "kind": "cross-file"
+    },
+    {
+      "repo": "sindresorhus/ky",
+      "question": "How are download progress callbacks reported while reading the body?",
+      "files": [
+        "source/utils/body.ts"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "sindresorhus/ky",
+      "question": "How are default headers from an instance combined with headers given per request?",
+      "files": [
+        "source/utils/merge.ts"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "sindresorhus/ky",
+      "question": "Which options are forwarded to fetch because ky does not know them?",
+      "files": [
+        "source/utils/options.ts"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "sindresorhus/ky",
+      "question": "How is a per-attempt request timeout enforced?",
+      "files": [
+        "source/utils/timeout.ts"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "sindresorhus/ky",
+      "question": "What information does the error for a non-2xx response carry?",
+      "files": [
+        "source/errors/HTTPError.ts"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "sindresorhus/ky",
+      "question": "How does the pause between retries get cancelled when the user aborts?",
+      "files": [
+        "source/utils/delay.ts"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "sindresorhus/ky",
+      "question": "isHTTPError isTimeoutError type guards",
+      "files": [
+        "source/utils/type-guards.ts"
+      ],
+      "kind": "identifier"
+    },
+    {
+      "repo": "sindresorhus/ky",
+      "question": "Where is a JSON response validated against a Standard Schema, and what error is thrown on failure?",
+      "files": [
+        "source/core/Ky.ts",
+        "source/errors/SchemaValidationError.ts"
+      ],
+      "kind": "cross-file"
+    },
+    {
+      "repo": "go-chi/chi",
+      "question": "How does the router match a URL path against registered routes?",
+      "files": [
+        "tree.go"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "go-chi/chi",
+      "question": "How do I read a URL parameter like {id} inside a handler?",
+      "files": [
+        "context.go"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "go-chi/chi",
+      "question": "How do I mount a sub-router under a path prefix?",
+      "files": [
+        "mux.go"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "go-chi/chi",
+      "question": "How can I limit the number of requests processed at the same time?",
+      "files": [
+        "middleware/throttle.go"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "go-chi/chi",
+      "question": "Which middleware recovers from panics and logs the stack trace?",
+      "files": [
+        "middleware/recoverer.go"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "go-chi/chi",
+      "question": "How do I gzip responses?",
+      "files": [
+        "middleware/compress.go"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "go-chi/chi",
+      "question": "How is the client IP taken from X-Forwarded-For or X-Real-IP?",
+      "files": [
+        "middleware/realip.go",
+        "middleware/client_ip.go"
+      ],
+      "kind": "cross-file"
+    },
+    {
+      "repo": "go-chi/chi",
+      "question": "How is a unique ID attached to every request?",
+      "files": [
+        "middleware/request_id.go"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "go-chi/chi",
+      "question": "How do I cancel a request that takes too long?",
+      "files": [
+        "middleware/timeout.go"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "go-chi/chi",
+      "question": "How do I remove a trailing slash from the path?",
+      "files": [
+        "middleware/strip.go"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "go-chi/chi",
+      "question": "Which middleware rejects requests whose Content-Type is not allowed?",
+      "files": [
+        "middleware/content_type.go"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "go-chi/chi",
+      "question": "How can I route to different handlers based on a request header such as Host?",
+      "files": [
+        "middleware/route_headers.go"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "go-chi/chi",
+      "question": "How does the response writer wrapper capture the status code and bytes written?",
+      "files": [
+        "middleware/wrap_writer.go"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "go-chi/chi",
+      "question": "How are middlewares chained into a single handler with Chain and With?",
+      "files": [
+        "chain.go",
+        "mux.go"
+      ],
+      "kind": "cross-file"
+    },
+    {
+      "repo": "pallets/itsdangerous",
+      "question": "How is the signing key derived from the secret key and the salt?",
+      "files": [
+        "src/itsdangerous/signer.py"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "pallets/itsdangerous",
+      "question": "How are payloads compressed before signing to keep URLs short?",
+      "files": [
+        "src/itsdangerous/url_safe.py"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "pallets/itsdangerous",
+      "question": "How is base64 padding handled when decoding?",
+      "files": [
+        "src/itsdangerous/encoding.py"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "pallets/itsdangerous",
+      "question": "How can I load the payload even when the signature is bad, for debugging?",
+      "files": [
+        "src/itsdangerous/serializer.py"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "pallets/itsdangerous",
+      "question": "How are old signers or digest methods accepted while migrating?",
+      "files": [
+        "src/itsdangerous/serializer.py"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "pallets/itsdangerous",
+      "question": "Which exception tells me a signature has expired, and what extra data does it carry?",
+      "files": [
+        "src/itsdangerous/exc.py"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "pallets/itsdangerous",
+      "question": "How does a timestamp signature expire?",
+      "files": [
+        "src/itsdangerous/timed.py"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "pallets/itsdangerous",
+      "question": "How is the timestamp converted to bytes inside the token?",
+      "files": [
+        "src/itsdangerous/encoding.py",
+        "src/itsdangerous/timed.py"
+      ],
+      "kind": "cross-file"
+    },
+    {
+      "repo": "pallets/itsdangerous",
+      "question": "want_bytes base64_decode",
+      "files": [
+        "src/itsdangerous/encoding.py"
+      ],
+      "kind": "identifier"
+    },
+    {
+      "repo": "pallets/itsdangerous",
+      "question": "What JSON module is used to serialize data by default?",
+      "files": [
+        "src/itsdangerous/_json.py"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "NikhilBhatt-15/codeseek",
+      "question": "Which files and directories are skipped when scanning a repository?",
+      "files": [
+        "src/codeseek/discovery.py"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "NikhilBhatt-15/codeseek",
+      "question": "How are .gitignore rules applied?",
+      "files": [
+        "src/codeseek/discovery.py"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "NikhilBhatt-15/codeseek",
+      "question": "How does it choose between the Ollama and sentence-transformers backends?",
+      "files": [
+        "src/codeseek/embedder.py"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "NikhilBhatt-15/codeseek",
+      "question": "Which environment variables configure the tool?",
+      "files": [
+        "src/codeseek/config.py"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "NikhilBhatt-15/codeseek",
+      "question": "Where is the index stored on disk and how is the folder named?",
+      "files": [
+        "src/codeseek/store.py"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "NikhilBhatt-15/codeseek",
+      "question": "What happens if the index was built with a different model?",
+      "files": [
+        "src/codeseek/store.py"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "NikhilBhatt-15/codeseek",
+      "question": "How does re-indexing skip files that have not changed?",
+      "files": [
+        "src/codeseek/indexer.py"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "NikhilBhatt-15/codeseek",
+      "question": "How is the repository root found from a subdirectory?",
+      "files": [
+        "src/codeseek/service.py"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "NikhilBhatt-15/codeseek",
+      "question": "How is the search tool exposed to AI assistants over MCP?",
+      "files": [
+        "src/codeseek/mcp_server.py"
+      ],
+      "kind": "concept"
+    },
+    {
+      "repo": "NikhilBhatt-15/codeseek",
+      "question": "Where do search results get printed with colors, and where does the search come from?",
+      "files": [
+        "src/codeseek/cli.py",
+        "src/codeseek/service.py"
+      ],
+      "kind": "cross-file"
+    },
+    {
+      "repo": "sindresorhus/ky",
+      "question": "TypeError: The `timeout` option must be a non-negative number or `false`",
+      "files": [
+        "source/core/Ky.ts"
+      ],
+      "kind": "error-message"
+    },
+    {
+      "repo": "sindresorhus/ky",
+      "question": "TimeoutError: Request timed out: GET https://example.com",
+      "files": [
+        "source/errors/TimeoutError.ts"
+      ],
+      "kind": "error-message"
+    },
+    {
+      "repo": "sindresorhus/ky",
+      "question": "TypeError: Body is unusable: Body has already been read",
+      "files": [
+        "source/utils/body.ts"
+      ],
+      "kind": "error-message"
+    },
+    {
+      "repo": "sindresorhus/ky",
+      "question": "calculateRetryTimingDelay",
+      "files": [
+        "source/core/retry-timing.ts"
+      ],
+      "kind": "identifier"
+    },
+    {
+      "repo": "sindresorhus/ky",
+      "question": "maxSafeTimeout",
+      "files": [
+        "source/core/constants.ts"
+      ],
+      "kind": "identifier"
+    },
+    {
+      "repo": "go-chi/chi",
+      "question": "panic: chi: all middlewares must be defined before routes on a mux",
+      "files": [
+        "mux.go"
+      ],
+      "kind": "error-message"
+    },
+    {
+      "repo": "go-chi/chi",
+      "question": "ThrottleBacklog",
+      "files": [
+        "middleware/throttle.go"
+      ],
+      "kind": "identifier"
+    },
+    {
+      "repo": "go-chi/chi",
+      "question": "X-Request-Id header",
+      "files": [
+        "middleware/request_id.go"
+      ],
+      "kind": "identifier"
+    },
+    {
+      "repo": "go-chi/chi",
+      "question": "AllowContentEncoding",
+      "files": [
+        "middleware/content_encoding.go"
+      ],
+      "kind": "identifier"
+    },
+    {
+      "repo": "go-chi/chi",
+      "question": "chi.URLParam(r, \"articleID\")",
+      "files": [
+        "context.go"
+      ],
+      "kind": "identifier"
+    },
+    {
+      "repo": "pallets/itsdangerous",
+      "question": "itsdangerous.exc.SignatureExpired: Signature age 15 > 5 seconds",
+      "files": [
+        "src/itsdangerous/timed.py"
+      ],
+      "kind": "error-message"
+    },
+    {
+      "repo": "pallets/itsdangerous",
+      "question": "BadSignature: No b'.' found in value",
+      "files": [
+        "src/itsdangerous/signer.py"
+      ],
+      "kind": "error-message"
+    },
+    {
+      "repo": "pallets/itsdangerous",
+      "question": "key_derivation='django-concat'",
+      "files": [
+        "src/itsdangerous/signer.py"
+      ],
+      "kind": "identifier"
+    },
+    {
+      "repo": "pallets/itsdangerous",
+      "question": "URLSafeTimedSerializer",
+      "files": [
+        "src/itsdangerous/url_safe.py"
+      ],
+      "kind": "identifier"
+    },
+    {
+      "repo": "NikhilBhatt-15/codeseek",
+      "question": "CODESEEK_ environment variable prefix",
+      "files": [
+        "src/codeseek/config.py"
+      ],
+      "kind": "identifier"
+    },
+    {
+      "repo": "NikhilBhatt-15/codeseek",
+      "question": "IndexMismatchError",
+      "files": [
+        "src/codeseek/store.py"
+      ],
+      "kind": "identifier"
+    },
+    {
+      "repo": "NikhilBhatt-15/codeseek",
+      "question": ".codeseekignore",
+      "files": [
+        "src/codeseek/discovery.py"
+      ],
+      "kind": "identifier"
+    },
+    {
+      "repo": "NikhilBhatt-15/codeseek",
+      "question": "EXIT_NO_RESULTS",
+      "files": [
+        "src/codeseek/cli.py"
+      ],
+      "kind": "identifier"
+    }
+  ]
+}

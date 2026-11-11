@@ -1,8 +1,10 @@
 // Minimal streaming client for the Gemini API, called directly from the browser
 // with the visitor's own key. No backend sees the key or the conversation.
 
-export const DEFAULT_MODEL = 'gemini-flash-latest';
-export const SUGGESTED_MODELS = ['gemini-flash-latest', 'gemini-3.5-flash-lite', 'gemini-3.8-flash'];
+// Flash Lite by default: retrieval does the heavy lifting, so the model mostly explains 8
+// excerpts, and the free tier allows more requests per day for Lite than for Flash.
+export const DEFAULT_MODEL = 'gemini-flash-lite-latest';
+export const SUGGESTED_MODELS = ['gemini-flash-lite-latest', 'gemini-flash-latest', 'gemini-3.5-flash-lite', 'gemini-3.8-flash'];
 
 export interface Turn {
   role: 'user' | 'model';

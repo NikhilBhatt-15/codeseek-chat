@@ -24,9 +24,8 @@
       <section id="intro" class="intro">
         <h1>Ask any GitHub repo a question.</h1>
         <p>
-          The code is embedded <strong>in your browser</strong> with Google's
-          <a href="https://huggingface.co/google/embeddinggemma-2" target="_blank" rel="noopener">EmbeddingGemma&nbsp;2</a>.
-          There's no server. Answers come from Gemini using your own free API key, and without a key you still get semantic search.
+          Paste a repo, ask in plain English, and get an answer that links to the exact lines of code.
+          It all runs in your browser: no sign-up and no server.
         </p>
       </section>
 
@@ -40,6 +39,27 @@
       </form>
       <p id="device-note" class="device-note" hidden></p>
       <section id="examples" class="examples" aria-label="Examples with instant answers"></section>
+
+      <section id="how" class="how-it-works" aria-label="How it works">
+        <h2>How it works</h2>
+        <ol>
+          <li>
+            <strong>Reads the repo</strong>
+            <span>Downloads the code from GitHub and splits it into small pieces at functions and classes.</span>
+          </li>
+          <li>
+            <strong>Finds the right code</strong>
+            <span>An AI model running on your device
+              (<a href="https://huggingface.co/google/embeddinggemma-2" target="_blank" rel="noopener">EmbeddingGemma&nbsp;2</a>)
+              matches your question to the code by meaning, not just keywords.</span>
+          </li>
+          <li>
+            <strong>Explains it</strong>
+            <span>Gemini writes an answer that cites the exact lines. This step needs a free Gemini key;
+              without one you get the matching code.</span>
+          </li>
+        </ol>
+      </section>
 
       <section id="progress" class="progress" hidden>
         <div class="progress-head">
@@ -63,11 +83,14 @@
         </div>
         <div id="messages" class="messages" aria-live="polite"></div>
         <p id="model-status" class="model-status muted small" hidden></p>
+        <div class="ask-bar">
+          <button id="mode-badge" class="mode-badge" type="button"></button>
+          <span id="mode-note" class="muted small"></span>
+        </div>
         <form id="ask-form" class="ask-form">
-          <textarea id="ask-input" rows="1" placeholder="Ask about the code…" aria-label="Question"></textarea>
+          <textarea id="ask-input" rows="1" placeholder="Ask about the code, e.g. “where are errors handled?”" aria-label="Question"></textarea>
           <button id="ask-btn" type="submit">Ask</button>
         </form>
-        <p id="mode-note" class="muted small"></p>
       </section>
 
       <p id="error" class="error" role="alert" hidden></p>
@@ -84,21 +107,37 @@
           Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.
           It's sent only to Google's API, straight from your browser.
         </p>
-        <label>
-          GitHub token <span class="muted">(optional)</span>
-          <input id="gh-input" type="password" autocomplete="off" spellcheck="false" placeholder="Raises GitHub's limit from 60 to 5,000 requests/hour" />
-        </label>
-        <p class="muted small">
-          Without a token, GitHub allows 60 requests an hour per network, and each repo uses 2.
-          <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create a fine-grained token</a>
-          with <em>Public repositories (read-only)</em> and no permissions. It's sent only to api.github.com.
-        </p>
-        <label class="row"><input id="remember-input" type="checkbox" /> Remember these on this device</label>
-        <label>
-          Model
-          <input id="model-input" list="models" spellcheck="false" />
-          <datalist id="models"></datalist>
-        </label>
+        <label class="row"><input id="remember-input" type="checkbox" /> Remember on this device</label>
+        <details class="advanced">
+          <summary>Advanced</summary>
+          <label>
+            Model
+            <input id="model-input" list="models" spellcheck="false" />
+            <datalist id="models"></datalist>
+          </label>
+          <p class="muted small">Flash Lite is the default: fast, and the free tier allows the most requests per day.</p>
+          <label>
+            Multi-step search
+            <select id="agent-input">
+              <option value="auto">Auto: for "where is it called / used" questions</option>
+              <option value="always">Always</option>
+              <option value="off">Off: one search per question</option>
+            </select>
+          </label>
+          <p class="muted small">
+            Gemini searches, follows a function or variable to where it's defined and used, and reads more code
+            before answering. Uses a few more API calls.
+          </p>
+          <label>
+            GitHub token <span class="muted">(optional)</span>
+            <input id="gh-input" type="password" autocomplete="off" spellcheck="false" placeholder="Raises GitHub's limit from 60 to 5,000 requests/hour" />
+          </label>
+          <p class="muted small">
+            Only needed if you index many repos: without one, GitHub allows 60 requests an hour per network, and each repo uses 2.
+            <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create a fine-grained token</a>
+            with <em>Public repositories (read-only)</em> and no permissions. It's sent only to api.github.com.
+          </p>
+        </details>
         <p class="muted small">
           Privacy: indexing runs locally. When you ask a question with a key set, your question and the matching
           code excerpts are sent to Google's Gemini API. Without a key, nothing leaves your browser except

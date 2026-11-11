@@ -3,3 +3,5 @@ dist/
 *.log
 scripts/.build-examples.mjs
 .claude/
+scripts/.eval.mjs
+eval/.cache/

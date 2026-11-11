@@ -2,7 +2,7 @@
 
 Ask any public GitHub repository a question, in a web page with no backend.
 
-**Live:** https://nikhilbhatt-15.github.io/codeseek-chat/
+**Live:** https://codeseek-chat.netlify.app/
 
 The repository's code is embedded **in your browser** with Google DeepMind's
 [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2), using
@@ -10,6 +10,9 @@ The repository's code is embedded **in your browser** with Google DeepMind's
 as a fallback). Your question retrieves the most relevant code. With a free Gemini API key,
 Gemini writes an answer that cites `file:line` links into GitHub. Without a key you still get
 semantic search.
+
+Retrieval is measured, not assumed: a 64-question benchmark over four repos compares embeddings,
+BM25, hybrid fusion, a reranker, vector sizes and model precisions. [Results below](#retrieval-evaluation).
 
 It's the browser companion to [codeseek](https://github.com/NikhilBhatt-15/codeseek), the
 command-line tool, and uses the same chunking rules.
@@ -20,9 +23,14 @@ command-line tool, and uses the same chunking rules.
   questions that answer the moment you click. The model downloads in the background while you read.
 - **Shareable links.** `?repo=owner/repo&q=question` opens a repo and asks the question.
   Every answer has a **Copy link to this answer** button. For example:
-  [where does ky retry requests?](https://nikhilbhatt-15.github.io/codeseek-chat/?repo=sindresorhus/ky&q=Where%20do%20retries%20happen%3F)
+  [where does ky decide to retry a request?](https://codeseek-chat.netlify.app/?repo=sindresorhus/ky&q=Where%20does%20ky%20decide%20whether%20to%20retry%20a%20failed%20request%3F)
 - **How it found this.** Each answer shows the best-matching files with their similarity scores.
-- **No server.** It's a static site on GitHub Pages. Nothing to host and nothing to pay for.
+- **Multi-step search.** With a key, Gemini drives three tools over the in-browser index:
+  `search_code`, `find_references` (exact, whole-word) and `read_lines`. For questions like "where
+  is this called?" it searches, follows the identifier to its callers, reads more code, then
+  answers. The steps it took are shown above the answer. *Auto* (the default) uses it for
+  reference-style questions; it can be turned off or always on in Settings.
+- **No server.** It's a static site on Netlify. Nothing to host and nothing to pay for.
 - **Private by default.** Indexing happens on your device. Code goes to Gemini only when you
   ask a question with a key set, and then only the matching excerpts are sent.
 - **Bring your own key.** The key goes straight from your browser to Google, in a request
@@ -51,13 +59,88 @@ command-line tool, and uses the same chunking rules.
    blocks. This is a TypeScript port of codeseek's chunker, checked by the same tests.
 4. **Embed.** A Web Worker loads only the 270M text encoder (q4, about 175 MB, downloaded
    once and then cached by the browser). Each chunk is embedded as
-   `title: <path> | text: <code>`, cut to 256 dimensions (Matryoshka) and normalised.
+   `title: <path> | text: <code>` and normalised, keeping all 768 dimensions (see below for why).
 5. **Answer.** The question is embedded with the code-retrieval prompt, matched by exact
    cosine similarity, and the top 8 excerpts are sent to Gemini (streaming) with instructions
-   to cite them.
+   to cite them. Reference-style questions go through the multi-step agent instead.
 
 Measured in headless Edge: the first visit downloads the model in about 25 s. Indexing
 codeseek's 21 files (72 chunks) took about 60 s, and each question's retrieval takes 0.2 to 0.4 s.
+
+## Retrieval evaluation
+
+`npm run eval` scores retrieval on a fixed benchmark ([`eval/benchmark.json`](eval/benchmark.json)):
+**64 questions over 4 repos** in 3 languages, each labelled with the file(s) that answer it.
+
+- Repos, pinned to a commit: [ky](https://github.com/sindresorhus/ky) (TypeScript, 349 chunks),
+  [chi](https://github.com/go-chi/chi) (Go, 398), [itsdangerous](https://github.com/pallets/itsdangerous)
+  (Python, 85) and [codeseek](https://github.com/NikhilBhatt-15/codeseek) (Python, 72), indexed exactly like
+  the site's Quick mode.
+- Question kinds: 38 *concept* ("how can I limit concurrent requests?"), 6 *cross-file* (the answer
+  spans two files), 14 *identifier* (`ThrottleBacklog`) and 6 *error message*
+  (`panic: chi: all middlewares must be defined before routes on a mux`). Identifier and error
+  labels come from `grep` for the defining file.
+- **recall@k**: share of a question's answer files found in the top *k* chunks (after removing
+  overlapping chunks, as the app does). **MRR@10**: 1 / rank of the first answer chunk.
+
+All with the shipped model (EmbeddingGemma 2, q4):
+
+| Retriever | recall@1 | recall@5 | recall@10 | MRR@10 |
+|---|---|---|---|---|
+| BM25 only (code-aware tokens) | 0.38 | 0.79 | 0.89 | 0.58 |
+| **Embeddings, 768 dims (shipped)** | **0.68** | **0.94** | **1.00** | **0.81** |
+| Embeddings, 256 dims | 0.64 | 0.91 | 1.00 | 0.77 |
+| Embeddings, 128 dims | 0.58 | 0.88 | 0.96 | 0.72 |
+| Hybrid 768d: embeddings + BM25, reciprocal rank fusion | 0.63 | 0.92 | 0.95 | 0.77 |
+| Hybrid 256d | 0.59 | 0.90 | 0.97 | 0.74 |
+| Routed 768d: hybrid only for code-like queries | 0.66 | 0.94 | 1.00 | 0.80 |
+| Hybrid 256d + cross-encoder rerank of top 20 (ms-marco-MiniLM-L-6) | 0.44 | 0.87 | 0.91 | 0.63 |
+
+recall@5 by question kind:
+
+| Retriever | concept (38) | cross-file (6) | identifier (14) | error message (6) |
+|---|---|---|---|---|
+| BM25 only | 0.79 | 0.58 | 0.79 | **1.00** |
+| Embeddings 768d | **0.95** | **1.00** | **0.93** | 0.83 |
+| Hybrid 768d (RRF) | **0.95** | 0.83 | **0.93** | 0.83 |
+
+What this changed in the app:
+
+- **Hybrid search didn't earn its place.** The textbook upgrade, BM25 + reciprocal rank fusion,
+  was slightly *worse* than embeddings alone (MRR 0.77 vs 0.81), and it lost a cross-file
+  question (recall@5 0.83 vs 1.00 on that kind). BM25 only wins on pasted error
+  messages (6/6 vs 5/6). That's one question, too few to justify the cost everywhere, so exact
+  matching moved to where it is reliable: the agent's `find_references` tool.
+- **The reranker hurt badly** (recall@1 0.64 → 0.44, MRR 0.74 → 0.63 against the ranking it
+  reordered). ms-marco-MiniLM is trained on web search queries, not code, and a general-purpose
+  reranker of that size was a net loss here, so the app doesn't use one.
+- **768 dims instead of 256.** With the shipped q4 model, the full vector beat the Matryoshka
+  prefix on every metric (recall@1 +4 points, MRR +4). At the other precisions 768 still wins
+  on recall@1 and MRR, while recall@5 is mixed. The cost is 3× the vector storage (about 1 MB for
+  a 350-chunk repo), and search stays around 1 ms, so the app now keeps all 768.
+
+### Model size: q4 vs full precision
+
+The same model at four precisions (768 dims, same 64 questions):
+
+| Weights | Download | recall@1 | recall@5 | recall@10 | MRR@10 |
+|---|---|---|---|---|---|
+| fp32 | 1,084 MB | 0.67 | 0.92 | 0.98 | 0.80 |
+| fp16 | 542 MB | 0.67 | 0.92 | 0.98 | 0.80 |
+| q8 | 314 MB | 0.67 | 0.92 | 0.98 | 0.80 |
+| **q4 (shipped)** | **174 MB** | **0.68** | **0.94** | **1.00** | **0.81** |
+
+**The 4-bit model is 6× smaller than full precision and lost nothing measurable.** It scored
+within one question of fp32 on every metric. For a model every visitor downloads, that's the
+whole difference between a usable first visit and a 1 GB wait.
+
+Caveats: 64 questions is small, so one question moves recall@5 by about 1.6 points. Differences
+under ~3 points are noise. I wrote the questions and labels myself, knowing the code. The numbers
+are most useful for comparing configurations against each other.
+
+Reproduce: `npm run eval` (q4, about 10 minutes on a laptop CPU the first time; embeddings are
+cached in `eval/.cache`). `VARIANTS=q4,q8,fp16,fp32` compares model precisions and
+`RERANKER=<model id>` adds a reranker. Results are written to [`eval/results/`](eval/results/).
 
 ## Limits
 
@@ -79,14 +162,21 @@ npm run dev        # http://localhost:5173
 npm test           # unit tests (chunking, GitHub, retrieval, prompts, SSE parsing)
 npm run build      # type-check and production build into dist/
 npm run build:examples   # re-embed the example repos into public/examples/ (CPU, a few minutes)
+npm run eval             # retrieval benchmark (see above)
 ```
 
 The example indexes are made with the same model, chunking and document format as the browser,
 running on the CPU through onnxruntime-node. Their questions and saved answers live in
 `src/examples.ts`. The answers were written from the excerpts the index retrieved, and cite them.
 
-Pushing to `main` runs the tests and deploys to GitHub Pages through
-`.github/workflows/deploy.yml`.
+The site is hosted on Netlify's free plan. To deploy, build locally and upload:
+
+```sh
+npm run build
+npx netlify-cli deploy --prod --dir dist
+```
+
+Pushing to `main` also runs the tests in GitHub Actions (`.github/workflows/deploy.yml`).
 
 ## License
 

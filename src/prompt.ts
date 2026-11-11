@@ -5,7 +5,7 @@ export function systemPrompt(repo: string): string {
   return [
     `You are a senior engineer answering questions about the GitHub repository ${repo}.`,
     'Each question comes with numbered source excerpts retrieved from the repository.',
-    'Answer from those excerpts. Cite them inline as [1], [2] right after the claims they support.',
+    'Answer from those excerpts. Cite them inline as [1] or [1][3] right after the claims they support, never [1, 3].',
     'If the excerpts do not contain the answer, say so plainly and suggest what to search for instead.',
     'Do not invent files, functions or behaviour that the excerpts do not show.',
     'Be concise. Use Markdown, and fenced code blocks with a language tag for code.',
@@ -48,9 +48,14 @@ export function linkCitations(markdown: string, urlFor: (n: number) => string | 
   return parts
     .map((part, i) => {
       if (i % 2 === 1) return part; // code
-      return part.replace(/(?<![\w\\])\[(\d{1,2})\](?![(:])/g, (m, num: string) => {
-        const url = urlFor(Number(num));
-        return url ? `[[${num}]](${url})` : m;
+      // Single [2] or grouped [1, 6] / [1,3,4] markers (some models group them).
+      return part.replace(/(?<![\w\\])\[(\d{1,2}(?:\s*,\s*\d{1,2})*)\](?!\()/g, (m, nums: string, offset: number, text: string) => {
+        // "[1]: url" at the start of a line is a Markdown reference definition, not a citation.
+        if (text[offset + m.length] === ':' && /(^|\n)\s*$/.test(text.slice(0, offset))) return m;
+        const list = nums.split(',').map((n) => Number(n.trim()));
+        const urls = list.map((n) => urlFor(n));
+        if (urls.some((u) => !u)) return m;
+        return list.map((n, i) => `[[${n}]](${urls[i]})`).join('');
       });
     })
     .join('');
