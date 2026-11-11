@@ -16,6 +16,12 @@ command-line tool, and uses the same chunking rules.
 
 ## Features
 
+- **Instant examples.** Three example repos ship with pre-built indexes, each with example
+  questions that answer the moment you click. The model downloads in the background while you read.
+- **Shareable links.** `?repo=owner/repo&q=question` opens a repo and asks the question.
+  Every answer has a **Copy link to this answer** button. For example:
+  [where does ky retry requests?](https://nikhilbhatt-15.github.io/codeseek-chat/?repo=sindresorhus/ky&q=Where%20do%20retries%20happen%3F)
+- **How it found this.** Each answer shows the best-matching files with their similarity scores.
 - **No server.** It's a static site on GitHub Pages. Nothing to host and nothing to pay for.
 - **Private by default.** Indexing happens on your device. Code goes to Gemini only when you
   ask a question with a key set, and then only the matching excerpts are sent.
@@ -23,7 +29,12 @@ command-line tool, and uses the same chunking rules.
   header. It's kept for the session, or on this device if you choose.
 - **Cited answers.** `[1]`, `[2]` markers link to the exact lines on GitHub, and the excerpts
   used are shown under each answer.
-- **Quick or Full.** Start small and extend later without re-embedding what's done.
+- **Quick or Full.** Quick is the default. You see a time estimate for your device before
+  indexing starts (shared links wait for a click). Extend to Full later without re-embedding what's done.
+- **Search without a key.** Without a Gemini key you get the matching code as cards with file
+  names, line numbers and links into GitHub, plus a link to get a free key.
+- **Phone-friendly.** On phones the examples still answer instantly. The 175 MB model only
+  downloads if you ask for it, since a desktop browser with WebGPU works much better.
 - **Fast revisits.** Indexes are cached in IndexedDB per commit. Reopening a repo takes about 2 s.
 - **Follow-up questions.** Short follow-ups ("and where is it called?") reuse the previous
   question for retrieval.
@@ -67,7 +78,12 @@ npm install
 npm run dev        # http://localhost:5173
 npm test           # unit tests (chunking, GitHub, retrieval, prompts, SSE parsing)
 npm run build      # type-check and production build into dist/
+npm run build:examples   # re-embed the example repos into public/examples/ (CPU, a few minutes)
 ```
+
+The example indexes are made with the same model, chunking and document format as the browser,
+running on the CPU through onnxruntime-node. Their questions and saved answers live in
+`src/examples.ts`. The answers were written from the excerpts the index retrieved, and cite them.
 
 Pushing to `main` runs the tests and deploys to GitHub Pages through
 `.github/workflows/deploy.yml`.

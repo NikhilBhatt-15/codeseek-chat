@@ -1,6 +1,7 @@
 import { Embedder } from './embedder';
+import { EXAMPLES, findExample, loadExample, normaliseQuestion, type Example, type LoadedExample } from './examples';
 import { DEFAULT_MODEL, GeminiError, streamChat, SUGGESTED_MODELS, type Turn } from './gemini';
-import { blobUrl, fetchContents, fetchSnapshot, GitHubError, LIMITS, parseRepo, type IndexSize } from './github';
+import { blobUrl, fetchContents, fetchSnapshot, GitHubError, LIMITS, parseRepo, type IndexSize, type RepoSnapshot } from './github';
 import { linkCitations, retrievalQuery, systemPrompt, userPrompt } from './prompt';
 import { renderMarkdown } from './render';
 import {
@@ -18,6 +19,7 @@ import {
   type Hit,
   type RepoIndex,
 } from './repoIndex';
+import { fileMatches, shareUrl } from './share';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string) => {
@@ -25,6 +27,13 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
   if (cls) node.className = cls;
   if (text !== undefined) node.textContent = text;
   return node;
+};
+const link = (href: string, text: string, cls = '') => {
+  const a = el('a', cls, text);
+  a.href = href;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  return a;
 };
 
 // ---- settings (per-device conveniences; storage may be unavailable) ----
@@ -64,16 +73,87 @@ const settings = {
   model: store.get(MODEL_STORAGE) ?? DEFAULT_MODEL,
 };
 
+// ---- device ----
+
+const hasWebGPU = 'gpu' in navigator;
+const isMobile =
+  /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+  (matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) < 820);
+/** On phones the 175 MB model download only starts once the visitor asks for it. */
+let heavyAllowed = !isMobile;
+const MODEL_MB = 175;
+const GET_KEY_URL = 'https://aistudio.google.com/apikey';
+
 // ---- state ----
 
 let embedder: Embedder | null = null;
 let index: RepoIndex | null = null;
+let example: LoadedExample | null = null; // set while a pre-built example index is open
 let history: Turn[] = [];
 let lastQuestion: string | undefined;
 let indexing: AbortController | null = null;
 let answering: AbortController | null = null;
 
-const getEmbedder = () => (embedder ??= new Embedder());
+const model = { state: 'idle' as 'idle' | 'loading' | 'ready' | 'error', loaded: 0, total: 0, device: '' };
+
+function getEmbedder(): Embedder {
+  if (!embedder) {
+    embedder = new Embedder();
+    embedder.onLoadProgress = (loaded, total) => {
+      model.loaded = loaded;
+      model.total = total;
+      renderModelStatus();
+    };
+  }
+  return embedder;
+}
+
+/** Starts (or joins) the model download. */
+function loadModel(): Promise<string> {
+  if (model.state !== 'ready') model.state = 'loading';
+  renderModelStatus();
+  const ready = getEmbedder().load();
+  ready.then(
+    (device) => {
+      model.state = 'ready';
+      model.device = device;
+      renderModelStatus();
+    },
+    () => {
+      model.state = 'error';
+      renderModelStatus();
+    },
+  );
+  return ready;
+}
+
+const modelProgress = () => (model.total ? `${mb(model.loaded)} / ${mb(model.total)}` : 'starting');
+
+function renderModelStatus(): void {
+  const line = $('model-status');
+  if (!example || model.state === 'idle') {
+    line.hidden = true;
+    return;
+  }
+  line.hidden = false;
+  line.textContent =
+    model.state === 'ready'
+      ? `EmbeddingGemma 2 is ready on your ${model.device === 'webgpu' ? 'GPU' : 'CPU'}. Ask anything about this repo.`
+      : model.state === 'error'
+        ? 'The embedding model failed to load. Saved answers still work.'
+        : `Saved answers are instant. For your own questions, EmbeddingGemma 2 is downloading in the background (${modelProgress()}, once).`;
+}
+
+/** Whether the browser already has the model files (Transformers.js caches them in Cache Storage). */
+async function modelCached(): Promise<boolean> {
+  try {
+    const cache = await caches.open('transformers-cache');
+    const keys = await cache.keys();
+    return keys.some((r) => r.url.includes('embeddinggemma') && r.url.includes('.onnx'));
+  } catch {
+    return false;
+  }
+}
 
 // ---- UI helpers ----
 
@@ -86,13 +166,7 @@ function showError(message: string | null): void {
 const STEPS = ['Read the repository from GitHub', 'Download files', 'Load EmbeddingGemma 2', 'Embed code'];
 
 function setStep(active: number, note = '', fraction?: number): void {
-  const list = $('steps');
-  list.replaceChildren(
-    ...STEPS.map((label, i) => {
-      const li = el('li', i < active ? 'done' : i === active ? 'active' : '', label);
-      return li;
-    }),
-  );
+  $('steps').replaceChildren(...STEPS.map((label, i) => el('li', i < active ? 'done' : i === active ? 'active' : '', label)));
   $('progress-note').textContent = note;
   if (fraction !== undefined) $('bar-fill').style.width = `${Math.round(fraction * 100)}%`;
 }
@@ -103,17 +177,55 @@ const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n ==
 function updateModeNote(): void {
   $('mode-note').textContent = settings.apiKey
     ? `Answers by ${settings.model}. Your question and the matching excerpts are sent to Google's Gemini API.`
-    : 'Search-only mode: showing the best-matching code. Add a free Gemini API key in Settings to get written answers.';
+    : 'Search-only mode: you get the best-matching code. Add a free Gemini API key in Settings to get written answers.';
+}
+
+function setUrl(repo: string | null, question: string | null): void {
+  try {
+    const url = new URL(location.href);
+    url.search = '';
+    if (repo) url.searchParams.set('repo', repo);
+    if (repo && question) url.searchParams.set('q', question);
+    window.history.replaceState(null, '', url);
+  } catch {
+    // ignore
+  }
+}
+
+// ---- landing ----
+
+function renderExamples(): void {
+  const box = $('examples');
+  box.replaceChildren(el('p', 'examples-head', 'Instant answers, no download: pick a question'));
+  for (const ex of EXAMPLES) {
+    const card = el('div', 'example');
+    const head = el('button', 'example-repo', ex.repo);
+    head.type = 'button';
+    head.title = `Open ${ex.repo} (pre-built index)`;
+    head.onclick = () => void openExample(ex);
+    const qs = el('div', 'example-qs');
+    for (const q of ex.questions) {
+      const b = el('button', 'chip', q.question);
+      b.type = 'button';
+      b.onclick = () => void openExample(ex, q.question);
+      qs.append(b);
+    }
+    card.append(head, el('span', 'muted small', ` · ${ex.blurb}`), qs);
+    box.append(card);
+  }
+  if (isMobile) {
+    const note = $('device-note');
+    note.hidden = false;
+    note.textContent =
+      'On a phone? The examples below answer instantly. Indexing your own repo downloads a 175 MB model and works best on a desktop browser with WebGPU.';
+  }
 }
 
 // ---- indexing ----
 
-const SIZE_STORAGE = 'codeseek-chat:size';
 const RATE_STORAGE = 'codeseek-chat:chunks-per-second';
-
 const sizeSelect = $<HTMLSelectElement>('size-select');
-sizeSelect.value = store.get(SIZE_STORAGE) === 'full' ? 'full' : 'quick';
-sizeSelect.addEventListener('change', () => store.set(SIZE_STORAGE, sizeSelect.value, true));
+sizeSelect.value = 'quick';
 
 /** This device's embedding speed from its last run, for time estimates. */
 function measuredRate(): number | null {
@@ -126,21 +238,61 @@ function duration(seconds: number): string {
   return `${Math.round(seconds / 60)} min`;
 }
 
+/** A guess for devices that haven't indexed anything yet: laptop GPUs do ~2 chunks/s, CPUs far less. */
+const guessedRate = () => (hasWebGPU && !isMobile ? 2 : 0.4);
+
 function estimate(chunks: number): string {
   const rate = measuredRate();
-  return rate ? `about ${duration(chunks / rate)}` : `~${plural(chunks, 'chunk')}`;
+  return `about ${duration(chunks / (rate ?? guessedRate()))}`;
+}
+
+async function estimateLine(snap: RepoSnapshot, files = snap.files): Promise<string> {
+  const bytes = files.reduce((sum, f) => sum + f.size, 0);
+  const chunks = estimateChunks(bytes);
+  const measured = measuredRate() !== null;
+  const parts = [`${plural(files.length, 'file')}, ~${plural(chunks, 'chunk')}: ${estimate(chunks)} on ${measured ? 'your device' : 'a typical laptop'}`];
+  if (!(await modelCached())) parts.push(`plus a one-time ${MODEL_MB} MB model download`);
+  if (!hasWebGPU) parts.push('slower here: this browser has no WebGPU');
+  return `${parts.join(', ')}.`;
+}
+
+/** Shows the estimate with a Start button; resolves when clicked, rejects when cancelled. */
+function waitForStart(signal: AbortSignal, label: string): Promise<void> {
+  const box = $('confirm');
+  const btn = $<HTMLButtonElement>('start-btn');
+  btn.textContent = label;
+  box.hidden = false;
+  $('progress').scrollIntoView({ block: 'center', behavior: 'smooth' });
+  btn.focus({ preventScroll: true });
+  return new Promise<void>((resolve, reject) => {
+    const done = () => {
+      box.hidden = true;
+      signal.removeEventListener('abort', abort);
+    };
+    const abort = () => {
+      done();
+      reject(signal.reason);
+    };
+    signal.addEventListener('abort', abort);
+    btn.onclick = () => {
+      done();
+      resolve();
+    };
+  });
 }
 
 interface IndexOptions {
   size?: IndexSize;
   extend?: RepoIndex; // index the files this one skipped, at the same commit
+  confirm?: boolean; // show the estimate and wait for Start (shared links, phones)
 }
 
-async function indexRepo(input: string, opts: IndexOptions = {}): Promise<void> {
+/** Indexes a repo and opens the chat. Resolves to true once the chat is open. */
+async function indexRepo(input: string, opts: IndexOptions = {}): Promise<boolean> {
   const ref = parseRepo(input);
   if (!ref) {
     showError('Enter a repository as owner/repo or a github.com URL.');
-    return;
+    return false;
   }
   const size: IndexSize = opts.size ?? (sizeSelect.value === 'full' ? 'full' : 'quick');
   showError(null);
@@ -152,6 +304,8 @@ async function indexRepo(input: string, opts: IndexOptions = {}): Promise<void> 
   $<HTMLButtonElement>('index-btn').disabled = true;
   $('progress').hidden = false;
   $('chat').hidden = true;
+  $('estimate').hidden = true;
+  $('confirm').hidden = true;
   $('progress-title').textContent = `${opts.extend ? 'Indexing the rest of' : 'Indexing'} ${ref.owner}/${ref.repo}…`;
   setStep(0, 'Listing files…', 0);
 
@@ -163,27 +317,28 @@ async function indexRepo(input: string, opts: IndexOptions = {}): Promise<void> 
     const cached = opts.extend ?? (await loadCached(indexKey(snap.owner, snap.repo, snap.commit)));
     if (cached && (size === 'quick' || cached.size === 'full' || cached.skipped === 0)) {
       openChat(cached, 'loaded from this browser’s cache');
-      void getEmbedder().load(); // warm up for the first question
-      return;
+      if (heavyAllowed) void loadModel(); // warm up for the first question
+      return true;
     }
     // A cached quick index of this commit is extended rather than rebuilt.
     const base = cached ?? undefined;
     const todo = missingFiles(snap, base ?? null);
     if (!base && todo.length === 0) throw new GitHubError('No source files found in that repository.');
 
+    const est = $('estimate');
+    est.textContent = await estimateLine(snap, todo);
+    est.hidden = false;
+    if (opts.confirm || !heavyAllowed) {
+      setStep(1, isMobile ? 'This may be slow or fail on a phone. A desktop browser works best.' : '', 0);
+      await waitForStart(signal, isMobile ? 'Try anyway' : 'Start indexing');
+      heavyAllowed = true;
+    }
+
     // Start the model download while files are fetched.
-    const emb = getEmbedder();
-    let modelLoaded = 0;
-    let modelTotal = 0;
-    emb.onLoadProgress = (loaded, total) => {
-      modelLoaded = loaded;
-      modelTotal = total;
-    };
-    const modelReady = emb.load();
+    const modelReady = loadModel();
     modelReady.catch(() => {}); // surfaced below
 
-    const todoBytes = todo.reduce((sum, f) => sum + f.size, 0);
-    setStep(1, `${plural(todo.length, 'file')} to index (${estimate(estimateChunks(todoBytes))})`, 0.05);
+    setStep(1, `${plural(todo.length, 'file')} to index`, 0.05);
     const contents = await fetchContents(
       { ...snap, files: todo },
       (done, total) => setStep(1, `${done} / ${total} files`, 0.05 + 0.15 * (done / total)),
@@ -193,8 +348,8 @@ async function indexRepo(input: string, opts: IndexOptions = {}): Promise<void> 
 
     const chunks = chunkRepo(contents);
     const timer = setInterval(() => {
-      const pct = modelTotal ? modelLoaded / modelTotal : 0;
-      setStep(2, modelTotal ? `${mb(modelLoaded)} / ${mb(modelTotal)}. Downloaded once, then cached by your browser.` : 'Starting…', 0.2 + 0.2 * pct);
+      const pct = model.total ? model.loaded / model.total : 0;
+      setStep(2, model.total ? `${modelProgress()}. Downloaded once, then cached by your browser.` : 'Starting…', 0.2 + 0.2 * pct);
     }, 250);
     let device: string;
     try {
@@ -209,7 +364,7 @@ async function indexRepo(input: string, opts: IndexOptions = {}): Promise<void> 
     const started = performance.now();
     const vectors = await embedChunks(
       chunks,
-      (texts) => emb.embedBatch(texts),
+      (texts) => getEmbedder().embedBatch(texts),
       (done, total) => {
         const secs = (performance.now() - started) / 1000;
         const left = done > 0 ? (secs / done) * (total - done) : 0;
@@ -223,26 +378,59 @@ async function indexRepo(input: string, opts: IndexOptions = {}): Promise<void> 
     const built = buildIndex(snap, size, chunks, vectors, [...contents.keys()], base);
     await saveCached(built);
     openChat(built, base ? `added ${plural(todo.length, 'file')}` : '');
+    return true;
   } catch (err) {
     if (signal.aborted) {
       $('progress').hidden = true;
-      if (opts.extend) openChat(opts.extend, ''); // back to the index we had
-      return;
+      if (opts.extend) {
+        openChat(opts.extend, ''); // back to the index we had
+        return true;
+      }
+      return false;
     }
     if (err instanceof GitHubError && err.rateLimited) {
       const fallback = opts.extend ?? (await loadLatestCached(ref.owner, ref.repo));
       if (fallback) {
         openChat(fallback, 'cached copy: GitHub rate limit reached, so newer commits were not checked');
         showError(err.message);
-        return;
+        return true;
       }
     }
     $('progress').hidden = true;
     showError(err instanceof Error ? err.message : String(err));
+    return false;
   } finally {
     if (indexing === controller) indexing = null;
     $<HTMLButtonElement>('index-btn').disabled = false;
   }
+}
+
+/** Opens an example from its pre-built index (falling back to indexing it live), then asks `question`. */
+async function openExample(ex: Example, question?: string): Promise<void> {
+  showError(null);
+  indexing?.abort();
+  $<HTMLInputElement>('repo-input').value = ex.repo;
+  let loaded: LoadedExample;
+  try {
+    loaded = await loadExample(ex);
+  } catch {
+    if ((await indexRepo(ex.repo)) && question) await ask(question);
+    return;
+  }
+  openChat(loaded.index, `pre-built index from ${loaded.builtAt}`, loaded);
+  const intro = el('div', 'msg bot');
+  intro.append(el('p', 'answer', 'This repo is pre-indexed, so these answer instantly. You can also ask your own question.'));
+  const chips = el('div', 'example-qs');
+  for (const q of ex.questions) {
+    const b = el('button', 'chip', q.question);
+    b.type = 'button';
+    b.onclick = () => void ask(q.question);
+    chips.append(b);
+  }
+  intro.append(chips);
+  $('messages').append(intro);
+  if (heavyAllowed) void loadModel();
+  if (question) await ask(question);
 }
 
 function coverageNote(built: RepoIndex): string {
@@ -252,25 +440,20 @@ function coverageNote(built: RepoIndex): string {
   return notes.join('; ');
 }
 
-function openChat(built: RepoIndex, note: string): void {
+function openChat(built: RepoIndex, note: string, fromExample: LoadedExample | null = null): void {
   index = built;
+  example = fromExample;
   history = [];
   lastQuestion = undefined;
   $('progress').hidden = true;
   $('chat').hidden = false;
   $('intro').hidden = true;
+  $('examples').hidden = true;
+  $('device-note').hidden = true;
   $('messages').replaceChildren();
-  const label = $('repo-label');
-  const link = el('a', '', `${built.owner}/${built.repo}`);
-  link.setAttribute('href', `https://github.com/${built.owner}/${built.repo}/tree/${built.commit}`);
-  link.setAttribute('target', '_blank');
-  link.setAttribute('rel', 'noopener');
-  label.replaceChildren(link, ` @ ${built.branch ?? built.commit.slice(0, 7)}${built.branch ? ` (${built.commit.slice(0, 7)})` : ''}`);
-  $('repo-stats').textContent = [
-    `${plural(built.paths.length, 'file')}, ${plural(built.chunks.length, 'chunk')}`,
-    note,
-    coverageNote(built),
-  ]
+  const repoLink = link(`https://github.com/${built.owner}/${built.repo}/tree/${built.commit}`, `${built.owner}/${built.repo}`);
+  $('repo-label').replaceChildren(repoLink, ` @ ${built.branch ?? built.commit.slice(0, 7)}${built.branch ? ` (${built.commit.slice(0, 7)})` : ''}`);
+  $('repo-stats').textContent = [`${plural(built.paths.length, 'file')}, ${plural(built.chunks.length, 'chunk')}`, note, coverageNote(built)]
     .filter(Boolean)
     .join(' · ');
 
@@ -282,41 +465,118 @@ function openChat(built: RepoIndex, note: string): void {
     more.onclick = () => void indexRepo(`${built.owner}/${built.repo}`, { size: 'full', extend: built });
   }
   updateModeNote();
-  try {
-    setRepoParam(`${built.owner}/${built.repo}`);
-  } catch {
-    // ignore
-  }
-  $('ask-input').focus();
+  renderModelStatus();
+  setUrl(`${built.owner}/${built.repo}`, null);
+  if (!isMobile) $('ask-input').focus();
 }
 
-function setRepoParam(repo: string): void {
-  const url = new URL(location.href);
-  url.searchParams.set('repo', repo);
-  window.history.replaceState(null, '', url);
+// ---- rendering answers ----
+
+/** Code with line numbers taken from the file. */
+function codeBlock(text: string, firstLine: number): HTMLPreElement {
+  const pre = el('pre', 'numbered');
+  const code = el('code');
+  text.split('\n').forEach((line, i) => {
+    const row = el('span', 'line', line);
+    row.dataset.n = String(firstLine + i);
+    code.append(row);
+  });
+  pre.append(code);
+  return pre;
 }
 
-// ---- asking ----
+function hitCard(current: RepoIndex, h: Hit, n: number): HTMLElement {
+  const box = el('div', 'source');
+  const head = el('div', 'source-head');
+  const name = link(blobUrl(current, h.path, h.startLine, h.endLine), '', 'source-link');
+  const slash = h.path.lastIndexOf('/');
+  name.append(
+    el('span', 'num', `[${n}]`),
+    el('span', 'dir', slash >= 0 ? h.path.slice(0, slash + 1) : ''),
+    el('strong', '', h.path.slice(slash + 1)),
+    el('span', 'lines', ` L${h.startLine}–${h.endLine}`),
+  );
+  head.append(name, el('span', 'score', h.score.toFixed(3)));
+  box.append(head, codeBlock(h.text, h.startLine));
+  return box;
+}
 
-function renderSources(hits: Hit[], open: boolean): HTMLDetailsElement {
+function renderSources(current: RepoIndex, hits: Hit[], open: boolean): HTMLDetailsElement {
   const details = el('details', 'sources');
   details.open = open;
   details.append(el('summary', '', `${plural(hits.length, 'source')} from the repo`));
-  hits.forEach((h, i) => {
-    const box = el('div', 'source');
-    const head = el('div', 'source-head');
-    const a = el('a', '', `[${i + 1}] ${h.path}:${h.startLine}-${h.endLine}`);
-    a.setAttribute('href', blobUrl(index!, h.path, h.startLine, h.endLine));
-    a.setAttribute('target', '_blank');
-    a.setAttribute('rel', 'noopener');
-    head.append(a, el('span', 'muted', h.score.toFixed(3)));
-    const pre = el('pre');
-    pre.append(el('code', '', h.text));
-    box.append(head, pre);
-    details.append(box);
-  });
+  hits.forEach((h, i) => details.append(hitCard(current, h, i + 1)));
   return details;
 }
+
+/** The retrieval at a glance: best-matching files with their similarity scores. */
+function renderHowFound(current: RepoIndex, hits: Hit[], searchMs: number | null): HTMLDetailsElement {
+  const details = el('details', 'how');
+  const timing = searchMs === null ? 'at build time' : `in ${searchMs < 1 ? '<1' : Math.round(searchMs)} ms`;
+  details.append(el('summary', '', `How it found this · ${plural(current.chunks.length, 'chunk')} compared ${timing}`));
+  const files = fileMatches(hits).slice(0, 6);
+  const top = files[0]?.score ?? 1;
+  // Scale between a bit below the weakest file and the best one, so close scores stay readable.
+  const last = files.at(-1)?.score ?? 0;
+  const floor = Math.max(0, last - Math.max(0.01, (top - last) * 0.5));
+  const list = el('div', 'how-list');
+  for (const f of files) {
+    const row = el('div', 'how-row');
+    const name = link(blobUrl(current, f.path), f.path, 'how-path');
+    const bar = el('div', 'how-bar');
+    const fill = el('div');
+    fill.style.width = `${Math.max(6, ((f.score - floor) / Math.max(1e-6, top - floor)) * 100)}%`;
+    bar.append(fill);
+    row.append(name, bar, el('span', 'how-score', `${f.score.toFixed(3)}${f.chunks > 1 ? ` ×${f.chunks}` : ''}`));
+    list.append(row);
+  }
+  details.append(
+    list,
+    el(
+      'p',
+      'muted small',
+      'Your question was embedded with EmbeddingGemma 2 and compared with every chunk by cosine similarity. Score = best chunk in the file (×n = matching chunks). The top excerpts are cited below.',
+    ),
+  );
+  return details;
+}
+
+function keyCta(): HTMLElement {
+  const box = el('div', 'cta');
+  box.append(el('span', '', 'Want a written answer with citations? '));
+  const get = link(GET_KEY_URL, 'Get a free Gemini key (30 sec)', 'cta-link');
+  const paste = el('button', 'ghost small', 'Paste key');
+  paste.type = 'button';
+  paste.onclick = openSettings;
+  box.append(get, paste);
+  return box;
+}
+
+function shareButton(current: RepoIndex, question: string): HTMLButtonElement {
+  const btn = el('button', 'ghost small share', 'Copy link to this answer');
+  btn.type = 'button';
+  btn.onclick = async () => {
+    const url = shareUrl(location.href, `${current.owner}/${current.repo}`, question);
+    try {
+      await navigator.clipboard.writeText(url);
+      btn.textContent = 'Link copied ✓';
+    } catch {
+      window.prompt('Copy this link:', url);
+    }
+    setTimeout(() => (btn.textContent = 'Copy link to this answer'), 2000);
+  };
+  return btn;
+}
+
+function savedAnswer(question: string): { answer: string; hits: Hit[] } | null {
+  if (!example || example.index !== index) return null;
+  const key = normaliseQuestion(question);
+  const q = example.example.questions.find((x) => normaliseQuestion(x.question) === key);
+  const hits = example.hits.get(key);
+  return q && hits && q.answer ? { answer: q.answer, hits } : null;
+}
+
+// ---- asking ----
 
 async function ask(question: string): Promise<void> {
   if (!index || !question.trim()) return;
@@ -324,31 +584,79 @@ async function ask(question: string): Promise<void> {
   answering?.abort();
   const controller = new AbortController();
   answering = controller;
+  const current = index;
+  setUrl(`${current.owner}/${current.repo}`, question);
 
   const messages = $('messages');
-  messages.append(el('div', 'msg user', question));
+  const asked = el('div', 'msg user', question);
+  messages.append(asked);
   const bot = el('div', 'msg bot pending');
   const answer = el('div', 'answer');
   bot.append(answer);
   messages.append(bot);
   bot.scrollIntoView({ block: 'nearest' });
   $<HTMLButtonElement>('ask-btn').disabled = true;
+  const urlFor = (hits: Hit[]) => (n: number) => {
+    const h = hits[n - 1];
+    return h ? blobUrl(current, h.path, h.startLine, h.endLine) : null;
+  };
+  const footer = () => {
+    const row = el('div', 'msg-actions');
+    row.append(shareButton(current, question));
+    return row;
+  };
 
+  let status: ReturnType<typeof setInterval> | undefined;
   try {
+    const saved = savedAnswer(question);
+    if (saved) {
+      lastQuestion = question;
+      answer.innerHTML = renderMarkdown(linkCitations(saved.answer, urlFor(saved.hits)));
+      bot.append(
+        el('p', 'muted small saved', 'Saved example answer. The excerpts were retrieved by EmbeddingGemma 2 from this index.'),
+        renderHowFound(current, saved.hits, null),
+        renderSources(current, saved.hits, false),
+        footer(),
+      );
+      asked.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      history = [...history, { role: 'user' as const, text: question }, { role: 'model' as const, text: saved.answer }].slice(-6);
+      return;
+    }
+
+    if (model.state !== 'ready' && !heavyAllowed) {
+      // Phones: don't start a 175 MB download without asking.
+      answer.append(el('p', '', `Your own questions need the ${MODEL_MB} MB embedding model, which is slow or unsupported on most phones. Open this page on a desktop to ask anything, or try the example questions above.`));
+      const go = el('button', 'ghost small', 'Download it anyway');
+      go.type = 'button';
+      go.onclick = () => {
+        heavyAllowed = true;
+        bot.previousElementSibling?.remove();
+        bot.remove();
+        void ask(question);
+      };
+      bot.append(go);
+      return;
+    }
+
+    if (model.state !== 'ready') {
+      const paintStatus = () => (answer.textContent = `Loading EmbeddingGemma 2 (${modelProgress()})… your question runs as soon as it's ready.`);
+      paintStatus();
+      status = setInterval(paintStatus, 250);
+    }
     const query = await getEmbedder().embedQuery(retrievalQuery(question, lastQuestion));
-    const hits = dedupeHits(search(index, query, 16)).slice(0, 8);
+    clearInterval(status);
+    answer.textContent = '';
+    if (controller.signal.aborted) return;
+    const t0 = performance.now();
+    const hits = dedupeHits(search(current, query, 16)).slice(0, 8);
+    const searchMs = performance.now() - t0;
     lastQuestion = question;
-    const current = index;
-    const urlFor = (n: number) => {
-      const h = hits[n - 1];
-      return h ? blobUrl(current, h.path, h.startLine, h.endLine) : null;
-    };
 
     if (!settings.apiKey) {
-      answer.innerHTML = renderMarkdown(
-        hits.length ? 'Here’s the code that best matches your question:' : 'No matching code found.',
-      );
-      bot.append(renderSources(hits.slice(0, 5), true));
+      answer.innerHTML = renderMarkdown(hits.length ? 'Here’s the code that best matches your question:' : 'No matching code found.');
+      const results = el('div', 'results');
+      hits.slice(0, 5).forEach((h, i) => results.append(hitCard(current, h, i + 1)));
+      bot.append(results, keyCta(), renderHowFound(current, hits, searchMs), footer());
       return;
     }
 
@@ -356,7 +664,7 @@ async function ask(question: string): Promise<void> {
     let frame = 0;
     const paint = () => {
       frame = 0;
-      answer.innerHTML = renderMarkdown(linkCitations(text, urlFor));
+      answer.innerHTML = renderMarkdown(linkCitations(text, urlFor(hits)));
     };
     const turns: Turn[] = [...history, { role: 'user', text: userPrompt(question, hits) }];
     text = await streamChat({
@@ -372,7 +680,7 @@ async function ask(question: string): Promise<void> {
     });
     cancelAnimationFrame(frame);
     paint();
-    bot.append(renderSources(hits, false));
+    bot.append(renderHowFound(current, hits, searchMs), renderSources(current, hits, false), footer());
     // Keep a short plain-text history (without the bulky excerpts) for follow-ups.
     history = [...history, { role: 'user' as const, text: question }, { role: 'model' as const, text }].slice(-6);
   } catch (err) {
@@ -381,6 +689,7 @@ async function ask(question: string): Promise<void> {
     answer.textContent = '';
     answer.append(el('p', 'error', message));
   } finally {
+    clearInterval(status);
     bot.classList.remove('pending');
     $<HTMLButtonElement>('ask-btn').disabled = false;
     if (answering === controller) answering = null;
@@ -391,13 +700,10 @@ async function ask(question: string): Promise<void> {
 
 $('repo-form').addEventListener('submit', (e) => {
   e.preventDefault();
-  void indexRepo($<HTMLInputElement>('repo-input').value);
-});
-$('examples').addEventListener('click', (e) => {
-  const repo = (e.target as HTMLElement).dataset.repo;
-  if (!repo) return;
-  $<HTMLInputElement>('repo-input').value = repo;
-  void indexRepo(repo);
+  const value = $<HTMLInputElement>('repo-input').value;
+  const ex = findExample(value);
+  if (ex && sizeSelect.value === 'quick') void openExample(ex);
+  else void indexRepo(value);
 });
 $('cancel-btn').addEventListener('click', () => indexing?.abort());
 
@@ -423,15 +729,15 @@ $('ask-form').addEventListener('submit', (e) => {
 });
 
 const dialog = $<HTMLDialogElement>('settings');
-const models = $('models');
-models.replaceChildren(...SUGGESTED_MODELS.map((m) => Object.assign(el('option'), { value: m })));
-$('settings-btn').addEventListener('click', () => {
+$('models').replaceChildren(...SUGGESTED_MODELS.map((m) => Object.assign(el('option'), { value: m })));
+function openSettings(): void {
   $<HTMLInputElement>('key-input').value = settings.apiKey;
   $<HTMLInputElement>('gh-input').value = settings.githubToken;
   $<HTMLInputElement>('model-input').value = settings.model;
   $<HTMLInputElement>('remember-input').checked = store.persisted(KEY_STORAGE) || store.persisted(GH_TOKEN_STORAGE);
   dialog.showModal();
-});
+}
+$('settings-btn').addEventListener('click', openSettings);
 dialog.addEventListener('close', () => {
   if (dialog.returnValue !== 'save') return;
   const remember = $<HTMLInputElement>('remember-input').checked;
@@ -444,6 +750,21 @@ dialog.addEventListener('close', () => {
   updateModeNote();
 });
 
-const shared = new URL(location.href).searchParams.get('repo');
-if (shared && parseRepo(shared)) $<HTMLInputElement>('repo-input').value = shared;
+// ---- start: ?repo=owner/repo&q=question ----
+
+renderExamples();
 updateModeNote();
+{
+  const params = new URL(location.href).searchParams;
+  const repo = params.get('repo');
+  const question = params.get('q')?.trim() || undefined;
+  if (repo && parseRepo(repo)) {
+    $<HTMLInputElement>('repo-input').value = repo;
+    const ex = findExample(repo);
+    if (ex) void openExample(ex, question);
+    else
+      void indexRepo(repo, { confirm: true }).then((opened) => {
+        if (opened && question) void ask(question);
+      });
+  }
+}

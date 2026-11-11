@@ -33,22 +33,22 @@
       <form id="repo-form" class="repo-form" autocomplete="off">
         <input id="repo-input" name="repo" placeholder="owner/repo or https://github.com/owner/repo" aria-label="GitHub repository" required />
         <select id="size-select" aria-label="How much of the repo to index" title="How much of the repo to index">
-          <option value="quick">Quick · up to 400 KB</option>
+          <option value="quick" selected>Quick · up to 400 KB</option>
           <option value="full">Full · up to 2.5 MB</option>
         </select>
         <button id="index-btn" type="submit">Index repo</button>
       </form>
-      <div id="examples" class="examples">
-        Try:
-        <button type="button" data-repo="NikhilBhatt-15/codeseek">NikhilBhatt-15/codeseek</button>
-        <button type="button" data-repo="sindresorhus/ky">sindresorhus/ky</button>
-        <button type="button" data-repo="pallets/itsdangerous">pallets/itsdangerous</button>
-      </div>
+      <p id="device-note" class="device-note" hidden></p>
+      <section id="examples" class="examples" aria-label="Examples with instant answers"></section>
 
       <section id="progress" class="progress" hidden>
         <div class="progress-head">
           <strong id="progress-title">Indexing…</strong>
           <button id="cancel-btn" class="ghost small" type="button">Cancel</button>
+        </div>
+        <p id="estimate" class="estimate" hidden></p>
+        <div id="confirm" class="confirm" hidden>
+          <button id="start-btn" type="button">Start indexing</button>
         </div>
         <ol id="steps" class="steps"></ol>
         <div class="bar"><div id="bar-fill"></div></div>
@@ -62,6 +62,7 @@
           <button id="more-btn" class="ghost small" type="button" hidden></button>
         </div>
         <div id="messages" class="messages" aria-live="polite"></div>
+        <p id="model-status" class="model-status muted small" hidden></p>
         <form id="ask-form" class="ask-form">
           <textarea id="ask-input" rows="1" placeholder="Ask about the code…" aria-label="Question"></textarea>
           <button id="ask-btn" type="submit">Ask</button>

@@ -10,7 +10,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:examples": "rolldown scripts/build-examples.ts --format esm --platform node --external @huggingface/transformers --file scripts/.build-examples.mjs && node scripts/.build-examples.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "4.3.1",
