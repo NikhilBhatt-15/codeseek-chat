@@ -13,7 +13,7 @@ if (-not $env:JUDGE_API_KEY) { Write-Host "No key entered; stopping."; exit 1 }
 $env:JUDGE_BASE_URL = 'https://api.groq.com/openai/v1'
 $env:JUDGE_MODEL = 'openai/gpt-oss-120b'
 
-Set-Location 'C:\Users\nikhi\Downloads\rea-projects\codeseek-chat'
+Set-Location (Join-Path $PSScriptRoot '..')
 Write-Host "gpt-oss-120b is grading 128 answers (64 offline + 64 Gemini). Rate limits may make it pause; expect 15-60 minutes."
 try {
   npm run eval:answers
