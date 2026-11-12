@@ -3,6 +3,8 @@
 //
 //   npm run eval:answers                    # offline model only (CPU, ~30 min, cached)
 //   $env:GEMINI_API_KEY = "<key>"; npm run eval:answers    # + Gemini answers + judge scores
+//   JUDGE_BASE_URL=https://api.groq.com/openai/v1 JUDGE_API_KEY=<key> npm run eval:answers
+//                                           # judge with gpt-oss-120b instead (OpenAI-compatible)
 //
 // Needs `npm run eval` first (it caches the corpora and embeddings this reuses).
 //
@@ -28,7 +30,15 @@ if (process.env.HF_CACHE) env.cacheDir = process.env.HF_CACHE;
 const bench = JSON.parse(readFileSync(join(evalDir, 'benchmark.json'), 'utf8')) as { repos: { repo: string; commit: string }[]; questions: Question[] };
 const KEY = process.env.GEMINI_API_KEY ?? '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL ?? 'gemini-flash-lite-latest';
-const JUDGE_MODEL = process.env.JUDGE_MODEL ?? 'gemini-flash-latest';
+// The judge defaults to Gemini Flash. Any OpenAI-compatible API works instead (for example
+// gpt-oss-120b on Groq): set JUDGE_BASE_URL, JUDGE_API_KEY and JUDGE_MODEL. A judge from another
+// model family avoids Gemini grading Gemini's own answers.
+const JUDGE_BASE_URL = (process.env.JUDGE_BASE_URL ?? '').replace(/\/+$/, '');
+const JUDGE_API_KEY = process.env.JUDGE_API_KEY ?? '';
+const JUDGE_MODEL = process.env.JUDGE_MODEL ?? (JUDGE_BASE_URL ? 'openai/gpt-oss-120b' : 'gemini-flash-latest');
+const CAN_JUDGE = JUDGE_BASE_URL ? Boolean(JUDGE_API_KEY) : Boolean(KEY);
+const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const DIM = 768;
 const slug = (r: string) => r.replace('/', '__');
 const readJson = <T>(p: string, fallback: T): T => (existsSync(p) ? (JSON.parse(readFileSync(p, 'utf8')) as T) : fallback);
@@ -90,8 +100,9 @@ async function gemini(model: string, body: unknown): Promise<string> {
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': KEY },
       body: JSON.stringify(body),
     });
-    if (res.status === 429 && attempt < 6) {
-      await new Promise((r) => setTimeout(r, 15000)); // free-tier rate limit: wait and retry
+    if (RETRYABLE.has(res.status) && attempt < 8) {
+      // Rate limit or "high demand": back off and retry (15 s, 30 s, 45 s, ... up to 2 min).
+      await sleep(Math.min(120000, 15000 * (attempt + 1)));
       continue;
     }
     if (!res.ok) throw new Error(`Gemini ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -143,8 +154,31 @@ function autoScores(answers: Answers) {
   return { citesRight: citesRight / eligible, eligible, validCitations: valid / n, anyCitation: cited / n };
 }
 
+/** OpenAI-compatible chat completion that returns JSON. */
+async function openaiJson(prompt: string): Promise<string> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${JUDGE_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${JUDGE_API_KEY}` },
+      body: JSON.stringify({
+        model: JUDGE_MODEL,
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        messages: [{ role: 'user', content: `${prompt}\n\nReply with JSON only: {"score": <1-5>, "reason": "<one sentence>"}` }],
+      }),
+    });
+    if (RETRYABLE.has(res.status) && attempt < 8) {
+      await sleep(Math.min(120000, 15000 * (attempt + 1)));
+      continue;
+    }
+    if (!res.ok) throw new Error(`Judge ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+    return data.choices?.[0]?.message?.content ?? '{}';
+  }
+}
+
 async function judge(system: string, answers: Answers): Promise<Record<string, number>> {
-  const path = join(cache, 'answers', `judge-${JUDGE_MODEL}-${system}.json`);
+  const path = join(cache, 'answers', `judge-${JUDGE_MODEL.replace(/[^\w.-]+/g, '_')}-${system}.json`);
   const done = readJson<Record<string, number>>(path, {});
   for (const q of bench.questions) {
     if (done[q.question] !== undefined) continue;
@@ -158,15 +192,18 @@ async function judge(system: string, answers: Answers): Promise<Record<string, n
       '',
       `Answer to grade:\n${answers[q.question]?.answer ?? '(none)'}`,
     ].join('\n');
-    const text = await gemini(JUDGE_MODEL, {
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0,
-        responseMimeType: 'application/json',
-        responseSchema: { type: 'OBJECT', properties: { score: { type: 'INTEGER' }, reason: { type: 'STRING' } }, required: ['score'] },
-      },
-    });
-    done[q.question] = Math.max(1, Math.min(5, Number((JSON.parse(text) as { score: number }).score) || 1));
+    const text = JUDGE_BASE_URL
+      ? await openaiJson(prompt)
+      : await gemini(JUDGE_MODEL, {
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0,
+            responseMimeType: 'application/json',
+            responseSchema: { type: 'OBJECT', properties: { score: { type: 'INTEGER' }, reason: { type: 'STRING' } }, required: ['score'] },
+          },
+        });
+    const match = text.match(/\{[\s\S]*\}/);
+    done[q.question] = Math.max(1, Math.min(5, Number((JSON.parse(match ? match[0] : text) as { score: number }).score) || 1));
     writeJson(path, done);
   }
   return done;
@@ -175,8 +212,11 @@ async function judge(system: string, answers: Answers): Promise<Record<string, n
 // ---- run ----
 
 const systems: { name: string; answers: Answers }[] = [{ name: `${LOCAL_LLM_LABEL} (offline, q4)`, answers: await answerLocal() }];
-if (KEY) systems.push({ name: `${GEMINI_MODEL} (API)`, answers: await answerGemini() });
-else console.log('\nNo GEMINI_API_KEY: skipping Gemini answers and judge scores.');
+const geminiCache = readJson<Answers>(join(cache, 'answers', `${GEMINI_MODEL}.json`), {});
+if (KEY || bench.questions.every((q) => geminiCache[q.question])) {
+  systems.push({ name: `${GEMINI_MODEL} (API)`, answers: KEY ? await answerGemini() : geminiCache });
+} else console.log('\nNo GEMINI_API_KEY: skipping Gemini answers.');
+if (!CAN_JUDGE) console.log('No judge key: skipping judge scores.');
 
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
 const rows: string[] = [];
@@ -185,13 +225,13 @@ for (const s of systems) {
   const auto = autoScores(s.answers);
   const list = Object.values(s.answers);
   const tps = list.filter((a) => a.tokens).map((a) => a.tokens! / a.seconds);
-  const scores = KEY ? Object.values(await judge(s.name.split(' ')[0]!, s.answers)) : [];
+  const scores = CAN_JUDGE ? Object.values(await judge(s.name.split(' ')[0]!, s.answers)) : [];
   const judged = scores.length ? `${mean(scores).toFixed(2)} | ${Math.round((scores.filter((x) => x >= 4).length / scores.length) * 100)}%` : '- | -';
   rows.push(`| ${s.name} | ${Math.round(auto.citesRight * 100)}% | ${Math.round(auto.validCitations * 100)}% | ${judged} | ${tps.length ? mean(tps).toFixed(1) : '-'} |`);
   json.push({ system: s.name, ...auto, judgeMean: scores.length ? mean(scores) : null, judgeAtLeast4: scores.length ? scores.filter((x) => x >= 4).length / scores.length : null, cpuTokensPerSecond: tps.length ? mean(tps) : null });
 }
 const report = [
-  `${bench.questions.length} questions; every system gets the same top-8 excerpts. Judge: ${KEY ? JUDGE_MODEL : 'not run (no key)'}.`,
+  `${bench.questions.length} questions; every system gets the same top-8 excerpts. Judge: ${CAN_JUDGE ? JUDGE_MODEL : 'not run (no key)'}.`,
   '',
   '| System | Cites the right file | Valid citations | Judge mean (1-5) | Judged ≥4 | CPU tokens/s |',
   '|---|---|---|---|---|---|',
@@ -200,4 +240,4 @@ const report = [
 console.log(`\n${report}`);
 mkdirSync(join(evalDir, 'results'), { recursive: true });
 writeFileSync(join(evalDir, 'results', 'answers.md'), `${report}\n`);
-writeJson(join(evalDir, 'results', 'answers.json'), { date: new Date().toISOString().slice(0, 10), judge: KEY ? JUDGE_MODEL : null, systems: json });
+writeJson(join(evalDir, 'results', 'answers.json'), { date: new Date().toISOString().slice(0, 10), judge: CAN_JUDGE ? JUDGE_MODEL : null, systems: json });

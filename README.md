@@ -153,18 +153,23 @@ The same model at four precisions (768 dims, same 64 questions):
 within one question of fp32 on every metric. For a model every visitor downloads, that's the
 whole difference between a usable first visit and a 1 GB wait.
 
-### Answer quality: offline model
+### Answer quality: offline model vs Gemini
 
-`npm run eval:answers` gives every system the same top 8 excerpts for each of the 64 questions
+`npm run eval:answers` gives both models the same top 8 excerpts for each of the 64 questions
 and scores the written answers.
 
-| System | Cites the right file¹ | Valid citations | Speed |
+| Model | Cites the right file¹ | Cites anything | Valid citations |
 |---|---|---|---|
-| Qwen3.5 0.8B, offline (q4) | 61% | 97% | 5 tokens/s on a laptop CPU |
+| Gemini Flash Lite (API, your key) | 88% | 98% | 98% |
+| Qwen3.5 0.8B (offline, in the browser) | 61% | 72% | 97% |
 
-¹ Of the questions where retrieval put an answer file in the top 8, the share whose answer cites
-an excerpt from that file. The comparison with Gemini (and a Gemini-judged quality score) runs
-when `GEMINI_API_KEY` is set.
+¹ The share of answers that cite an excerpt from a labelled answer file (retrieval put one in the
+top 8 for all 64 questions).
+
+**The free offline model gets about 70% of Gemini's score**, with no key and nothing leaving the
+device. Most of the gap is answers that cite nothing: 28% of the offline model's answers, against
+2% of Gemini's. A graded comparison (gpt-oss-120b as the judge, so Gemini doesn't grade its own
+answers) is half done: Groq's free tier allows one system's worth of grading per day.
 
 Caveats: 64 questions is small, so one question moves recall@5 by about 1.6 points. Differences
 under ~3 points are noise. I wrote the questions and labels myself, knowing the code. The numbers

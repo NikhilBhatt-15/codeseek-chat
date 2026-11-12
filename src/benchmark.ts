@@ -3,6 +3,7 @@
 import bench from '../eval/benchmark.json';
 import q4 from '../eval/results/q4.json';
 import variants from '../eval/results/variants.json';
+import answers from '../eval/results/answers.json';
 
 type Scores = Record<string, number>;
 interface Row {
@@ -251,6 +252,48 @@ function sizeChart(): HTMLElement {
   return box;
 }
 
+function answersCard(): HTMLElement {
+  const box = el('section', 'chart-card');
+  box.append(
+    el('h2', '', 'Does the offline AI hold up?'),
+    el(
+      'p',
+      'muted',
+      'Both models got the same 8 retrieved excerpts for each of the 64 questions. Bar: how often the answer cites an excerpt from the file that actually answers it.',
+    ),
+  );
+  const pct = (x: number) => `${Math.round(x * 100)}%`;
+  const label = (name: string) => (name.startsWith('Qwen') ? 'Qwen3.5 0.8B, offline in your browser' : 'Gemini Flash Lite, API with your key');
+  const systems = answers.systems as { system: string; citesRight: number; validCitations: number; anyCitation: number }[];
+  box.append(
+    barChart(
+      systems.map((s) => ({
+        label: label(s.system),
+        value: s.citesRight,
+        shown: pct(s.citesRight),
+        highlight: s.system.startsWith('Qwen'),
+        tip: [label(s.system), `cites the right file: ${pct(s.citesRight)}`, `cites anything: ${pct(s.anyCitation)}`, `valid citations: ${pct(s.validCitations)}`],
+      })),
+      1,
+      'Cites the right file',
+    ),
+  );
+  const [local, cloud] = [systems.find((s) => s.system.startsWith('Qwen'))!, systems.find((s) => !s.system.startsWith('Qwen'))!];
+  box.append(
+    table(
+      ['Model', 'Cites the right file', 'Cites anything', 'Valid citations'],
+      systems.map((s) => [label(s.system), pct(s.citesRight), pct(s.anyCitation), pct(s.validCitations)]),
+      'Show as a table',
+    ),
+    el(
+      'p',
+      'callout',
+      `The free offline model gets ${Math.round((local.citesRight / cloud.citesRight) * 100)}% of Gemini's score here, with no key and nothing leaving your device. Most of the gap is answers that cite nothing at all (${pct(1 - local.anyCitation)} of them, vs ${pct(1 - cloud.anyCitation)} for Gemini).`,
+    ),
+  );
+  return box;
+}
+
 function questionsList(): HTMLElement {
   const box = el('section', 'chart-card');
   box.append(
@@ -293,5 +336,5 @@ export function renderBenchmark(root: HTMLElement): void {
       'Every choice in codeseek chat\'s search was tested on a benchmark of real questions about real repos, including the upgrades that didn\'t make it in.',
     ),
   );
-  root.replaceChildren(intro, heroStats(), retrieverChart(), kindTable(), sizeChart(), questionsList());
+  root.replaceChildren(intro, heroStats(), retrieverChart(), kindTable(), sizeChart(), answersCard(), questionsList());
 }

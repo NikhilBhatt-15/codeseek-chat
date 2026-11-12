@@ -1,5 +1,5 @@
 {
- "date": "2026-11-11",
+ "date": "2026-11-12",
  "judge": null,
  "systems": [
   {
@@ -11,6 +11,16 @@
    "judgeMean": null,
    "judgeAtLeast4": null,
    "cpuTokensPerSecond": 4.998270632462094
+  },
+  {
+   "system": "gemini-flash-lite-latest (API)",
+   "citesRight": 0.875,
+   "eligible": 64,
+   "validCitations": 0.984375,
+   "anyCitation": 0.984375,
+   "judgeMean": null,
+   "judgeAtLeast4": null,
+   "cpuTokensPerSecond": null
   }
  ]
 }
