@@ -302,3 +302,5 @@ details.data-table summary { cursor: pointer; color: var(--muted); font-size: 0.
 .from-github h2 { margin: 0 0 6px; font-size: 1rem; }
 .from-github p { margin: 6px 0 0; }
 .bookmarklet { display: inline-block; margin-left: 6px; padding: 0.3rem 0.8rem; border-radius: 99px; background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 0.86rem; text-decoration: none; cursor: grab; }
+
+.chart-sub { margin: 14px 0 6px; font-size: 0.92rem; font-weight: 600; }

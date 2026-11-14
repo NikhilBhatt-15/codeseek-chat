@@ -1,6 +1,6 @@
 {
- "date": "2026-11-12",
- "judge": null,
+ "date": "2026-11-14",
+ "judge": "openai/gpt-oss-120b",
  "systems": [
   {
    "system": "Qwen3.5 0.8B (offline, q4)",
@@ -8,8 +8,8 @@
    "eligible": 64,
    "validCitations": 0.96875,
    "anyCitation": 0.71875,
-   "judgeMean": null,
-   "judgeAtLeast4": null,
+   "judgeMean": 3.0625,
+   "judgeAtLeast4": 0.40625,
    "cpuTokensPerSecond": 4.998270632462094
   },
   {
@@ -18,8 +18,8 @@
    "eligible": 64,
    "validCitations": 0.984375,
    "anyCitation": 0.984375,
-   "judgeMean": null,
-   "judgeAtLeast4": null,
+   "judgeMean": 4.78125,
+   "judgeAtLeast4": 0.9375,
    "cpuTokensPerSecond": null
   }
  ]

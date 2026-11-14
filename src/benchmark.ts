@@ -259,36 +259,64 @@ function answersCard(): HTMLElement {
     el(
       'p',
       'muted',
-      'Both models got the same 8 retrieved excerpts for each of the 64 questions. Bar: how often the answer cites an excerpt from the file that actually answers it.',
+      `Both models got the same 8 retrieved excerpts for each of the 64 questions. An independent model from another family (${answers.judge ?? 'a judge'}) graded every answer 1 to 5 against the excerpts, so Gemini isn't grading its own work.`,
     ),
   );
   const pct = (x: number) => `${Math.round(x * 100)}%`;
   const label = (name: string) => (name.startsWith('Qwen') ? 'Qwen3.5 0.8B, offline in your browser' : 'Gemini Flash Lite, API with your key');
-  const systems = answers.systems as { system: string; citesRight: number; validCitations: number; anyCitation: number }[];
+  const systems = answers.systems as {
+    system: string;
+    citesRight: number;
+    validCitations: number;
+    anyCitation: number;
+    judgeMean: number | null;
+    judgeAtLeast4: number | null;
+  }[];
+  const tip = (s: (typeof systems)[number]) => [
+    label(s.system),
+    ...(s.judgeMean !== null ? [`judge mean: ${s.judgeMean.toFixed(2)} / 5`, `rated good (4-5): ${pct(s.judgeAtLeast4!)}`] : []),
+    `cites the right file: ${pct(s.citesRight)}`,
+    `cites anything: ${pct(s.anyCitation)}`,
+  ];
+  const sub = (text: string) => el('h3', 'chart-sub', text);
+  if (systems.every((s) => s.judgeAtLeast4 !== null)) {
+    box.append(
+      sub('Answers rated good (4 or 5 out of 5)'),
+      barChart(
+        systems.map((s) => ({ label: label(s.system), value: s.judgeAtLeast4!, shown: pct(s.judgeAtLeast4!), highlight: s.system.startsWith('Qwen'), tip: tip(s) })),
+        1,
+        'Rated good by the judge',
+      ),
+    );
+  }
   box.append(
+    sub('Answers that cite the file that actually answers the question'),
     barChart(
-      systems.map((s) => ({
-        label: label(s.system),
-        value: s.citesRight,
-        shown: pct(s.citesRight),
-        highlight: s.system.startsWith('Qwen'),
-        tip: [label(s.system), `cites the right file: ${pct(s.citesRight)}`, `cites anything: ${pct(s.anyCitation)}`, `valid citations: ${pct(s.validCitations)}`],
-      })),
+      systems.map((s) => ({ label: label(s.system), value: s.citesRight, shown: pct(s.citesRight), highlight: s.system.startsWith('Qwen'), tip: tip(s) })),
       1,
       'Cites the right file',
+    ),
+    table(
+      ['Model', 'Judge mean (1-5)', 'Rated good', 'Cites the right file', 'Cites anything', 'Valid citations'],
+      systems.map((s) => [
+        label(s.system),
+        s.judgeMean !== null ? s.judgeMean.toFixed(2) : '-',
+        s.judgeAtLeast4 !== null ? pct(s.judgeAtLeast4) : '-',
+        pct(s.citesRight),
+        pct(s.anyCitation),
+        pct(s.validCitations),
+      ]),
+      'Show as a table',
     ),
   );
   const [local, cloud] = [systems.find((s) => s.system.startsWith('Qwen'))!, systems.find((s) => !s.system.startsWith('Qwen'))!];
   box.append(
-    table(
-      ['Model', 'Cites the right file', 'Cites anything', 'Valid citations'],
-      systems.map((s) => [label(s.system), pct(s.citesRight), pct(s.anyCitation), pct(s.validCitations)]),
-      'Show as a table',
-    ),
     el(
       'p',
       'callout',
-      `The free offline model gets ${Math.round((local.citesRight / cloud.citesRight) * 100)}% of Gemini's score here, with no key and nothing leaving your device. Most of the gap is answers that cite nothing at all (${pct(1 - local.anyCitation)} of them, vs ${pct(1 - cloud.anyCitation)} for Gemini).`,
+      local.judgeAtLeast4 !== null && cloud.judgeAtLeast4 !== null
+        ? `Gemini's answers are good almost every time (${pct(cloud.judgeAtLeast4)}); the free 0.8B model gets a good answer ${pct(local.judgeAtLeast4)} of the time, with no key and nothing leaving your device. Part of the gap is answers that cite nothing at all (${pct(1 - local.anyCitation)} of the offline model's, vs ${pct(1 - cloud.anyCitation)} of Gemini's). Offline mode is for privacy and zero setup, not accuracy.`
+        : `The free offline model cites the right file ${pct(local.citesRight)} of the time, against ${pct(cloud.citesRight)} for Gemini.`,
     ),
   );
   return box;

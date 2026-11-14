@@ -155,21 +155,23 @@ whole difference between a usable first visit and a 1 GB wait.
 
 ### Answer quality: offline model vs Gemini
 
-`npm run eval:answers` gives both models the same top 8 excerpts for each of the 64 questions
-and scores the written answers.
+`npm run eval:answers` gives both models the same top 8 excerpts for each of the 64 questions.
+An independent judge from another model family, gpt-oss-120b, grades every answer 1-5 against
+the excerpts, so Gemini doesn't grade its own answers.
 
-| Model | Cites the right file¹ | Cites anything | Valid citations |
-|---|---|---|---|
-| Gemini Flash Lite (API, your key) | 88% | 98% | 98% |
-| Qwen3.5 0.8B (offline, in the browser) | 61% | 72% | 97% |
+| Model | Judge mean (1-5) | Rated good (4-5) | Cites the right file¹ | Cites anything | Valid citations |
+|---|---|---|---|---|---|
+| Gemini Flash Lite (API, your key) | 4.78 | 94% | 88% | 98% | 98% |
+| Qwen3.5 0.8B (offline, in the browser) | 3.06 | 41% | 61% | 72% | 97% |
 
 ¹ The share of answers that cite an excerpt from a labelled answer file (retrieval put one in the
 top 8 for all 64 questions).
 
-**The free offline model gets about 70% of Gemini's score**, with no key and nothing leaving the
-device. Most of the gap is answers that cite nothing: 28% of the offline model's answers, against
-2% of Gemini's. A graded comparison (gpt-oss-120b as the judge, so Gemini doesn't grade its own
-answers) is half done: Groq's free tier allows one system's worth of grading per day.
+**Gemini's answers are good almost every time; the free 0.8B model's are good about 4 times in
+10.** Part of the gap is answers that cite nothing: 28% of the offline model's answers, against
+2% of Gemini's. The offline mode is for privacy and zero setup, not accuracy, and the app says so
+under every offline answer. (The judge ran on Groq's free tier, which allows about 65 gradings a
+day: `scripts/judge-groq.ps1` resumes where it stopped.)
 
 Caveats: 64 questions is small, so one question moves recall@5 by about 1.6 points. Differences
 under ~3 points are noise. I wrote the questions and labels myself, knowing the code. The numbers
